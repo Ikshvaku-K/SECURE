@@ -1,5 +1,7 @@
 # S.E.C.U.R.E
 
+**Spatial Enclave Cryptography for Untethered Reserves & Expenses**
+
 An offline-first iOS wallet. It signs transactions with a key held in the Secure Enclave, keeps an encrypted, hash-chained local ledger with category budgets, and is designed for peer-to-peer transfers verified by Ultra-Wideband proximity. It needs no internet connection and no servers.
 
 Alongside the wallet, the app has a set of **simulated** add-ons: credit-score access tiers, connected bank accounts in one dashboard, practice markets (stocks and ETFs, prediction markets, sports) and a guide to 27 trading, investing and betting strategies. They run in their own module and their own encrypted database and **don't change the wallet's transaction model**.
