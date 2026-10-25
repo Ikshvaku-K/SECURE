@@ -87,3 +87,12 @@
   - Result: both phones listed each other with matching wallet codes and live (simulated) distance; $25 sent from the first to the second; the payee saw the offer, both approved with Face ID (`notifyutil` match events); the payer's entry shows *Receipt: Countersigned* and a spatial proof with 10 samples per side; balances $295 and $25, both chains verified.
 - Not verified yet: Multipeer and UWB on two real iPhones, and the distance thresholds against a tape measure.
 
+## 2026-10-25 — Payment requests from the payee
+
+- New `request` message (payee → payer): amount and an optional note of up to 60 characters. The payer's phone shows it with a category picker and the live budget check; **Pay with Face ID** runs the normal payment, with the offer reusing the request's ID. **Decline** sends a `failure`.
+- The payee's phone accepts the answering offer without a second prompt **only** if it matches its own outstanding request (same ID, exact amount). It still approves with Face ID, because it signs its distance reading and the receipt. An offer for a different amount gets the normal "Accept?" prompt.
+- A request times out after 90 s and is withdrawn, so the payer's prompt closes. One payment or request at a time per link. A budget or balance stop on the payer's side reaches the requester as a plain-language reason.
+- Engine: `PeerConnection.request(amount:note:)`, a `decideRequest` callback, `paid` / `payFailed` events; the decision prompts are now generic, with a fallback answer on timeout or withdrawal. App: a Pay / Request switch on the send sheet and an incoming-request sheet.
+- Tests: 7 new (approve, decline, payer's budget stops it, approved over budget, a changed amount is not pre-approved, withdrawn request, one at a time) plus encoding checks; 20 phone-to-phone tests passed 20 times in a row; 144 in total.
+- Two-Simulator walkthrough: the second phone requested $10 "Coffee"; the first saw the request, picked Clothing (budget check "Near the limit, $180 → $190 of $200") and paid with Face ID; the requester approved with Face ID without an extra prompt. Balances went $295 → $285 and $25 → $35, and Clothing shows $190 of $200.
+

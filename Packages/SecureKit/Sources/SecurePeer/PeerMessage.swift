@@ -53,6 +53,28 @@ public struct PaymentOffer: Equatable, Sendable {
     }
 }
 
+/// Payee → payer: "please pay me this amount." The payer answers with an `offer` that reuses this ID, which the
+/// payee accepts without asking again (it still approves with Face ID), or with a `failure` if it declines.
+public struct PaymentRequest: Equatable, Sendable {
+    public static let maxNoteLength = 60
+
+    public var id: OfferID
+    public var payee: WalletPublicKey
+    public var payer: WalletPublicKey
+    public var amount: Money
+    /// Shown to the payer, e.g. "Lunch". Unverified text.
+    public var note: String?
+
+    public init(id: OfferID, payee: WalletPublicKey, payer: WalletPublicKey, amount: Money, note: String?) {
+        self.id = id
+        self.payee = payee
+        self.payer = payer
+        self.amount = amount
+        let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.note = trimmed.flatMap { $0.isEmpty ? nil : String($0.prefix(Self.maxNoteLength)) }
+    }
+}
+
 /// Payee → payer: accepted (with the payee's half of the nonce) or declined.
 public struct OfferReply: Equatable, Sendable {
     public var id: OfferID
@@ -88,6 +110,8 @@ public struct PeerFailure: Error, Equatable, Sendable {
 /// with each side on its own phone.
 public enum PeerMessage: Equatable, Sendable {
     case hello(PeerHello)
+    /// Payee → payer: a payment request.
+    case request(PaymentRequest)
     case offer(PaymentOffer)
     case reply(OfferReply)
     /// The sender's signed distance reading for this session.
@@ -104,6 +128,7 @@ public enum PeerMessage: Equatable, Sendable {
     public var offerID: OfferID? {
         switch self {
         case .hello: nil
+        case .request(let request): request.id
         case .offer(let offer): offer.id
         case .reply(let reply): reply.id
         case .measurement(let id, _), .ready(let id, _), .transfer(let id, _, _), .receipt(let id, _): id
@@ -112,7 +137,7 @@ public enum PeerMessage: Equatable, Sendable {
     }
 
     private enum Tag: UInt8 {
-        case hello = 1, offer, reply, measurement, ready, transfer, receipt, failure
+        case hello = 1, offer, reply, measurement, ready, transfer, receipt, failure, request
     }
 
     // MARK: Encoding
@@ -126,6 +151,13 @@ public enum PeerMessage: Equatable, Sendable {
             hello.walletKey.encode(to: &w)
             w.writeString(hello.displayName)
             w.writeBytes(hello.rangingToken)
+        case .request(let request):
+            w.writeU8(Tag.request.rawValue)
+            w.writeFixed(request.id.bytes)
+            request.payee.encode(to: &w)
+            request.payer.encode(to: &w)
+            Self.write(request.amount, to: &w)
+            w.writeOptional(request.note) { $0.writeString($1) }
         case .offer(let offer):
             w.writeU8(Tag.offer.rawValue)
             w.writeFixed(offer.id.bytes)
@@ -176,6 +208,14 @@ public enum PeerMessage: Equatable, Sendable {
             let name = try r.readString()
             guard name.count <= PeerHello.maxNameLength else { throw CanonicalError.invalidValue("display name") }
             self = .hello(PeerHello(walletKey: key, displayName: name, rangingToken: try r.readBytes()))
+        case .request:
+            let id = try Self.readID(&r)
+            let payee = try WalletPublicKey.decode(from: &r)
+            let payer = try WalletPublicKey.decode(from: &r)
+            let amount = try Self.readMoney(&r)
+            let note = try r.readOptional { try $0.readString() }
+            if let note, note.count > PaymentRequest.maxNoteLength { throw CanonicalError.invalidValue("note") }
+            self = .request(PaymentRequest(id: id, payee: payee, payer: payer, amount: amount, note: note))
         case .offer:
             let id = try Self.readID(&r)
             let payer = try WalletPublicKey.decode(from: &r)

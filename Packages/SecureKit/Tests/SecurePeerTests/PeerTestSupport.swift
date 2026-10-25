@@ -62,6 +62,9 @@ final class EventLog: Sendable {
     var failures: [String] {
         all.compactMap { if case .receiveFailed(let text) = $0 { text } else { nil } }
     }
+    var paid: [PeerPaymentOutcome] {
+        all.compactMap { if case .paid(let outcome, _) = $0 { outcome } else { nil } }
+    }
     var withdrawn: [OfferID] {
         all.compactMap { if case .offerWithdrawn(let id) = $0 { id } else { nil } }
     }
@@ -69,8 +72,11 @@ final class EventLog: Sendable {
 
 final class Counter: Sendable {
     private let value = Mutex<[IncomingOffer]>([])
+    private let requestLog = Mutex<[IncomingRequest]>([])
     func record(_ offer: IncomingOffer) { value.withLock { $0.append(offer) } }
+    func record(_ request: IncomingRequest) { requestLog.withLock { $0.append(request) } }
     var offers: [IncomingOffer] { value.withLock { $0 } }
+    var requests: [IncomingRequest] { requestLog.withLock { $0 } }
 }
 
 /// Two phones joined by in-memory wires, both introduced.
@@ -80,17 +86,22 @@ struct Link {
     let toPayee: Wire
     let toPayer: Wire
     let payeeEvents: EventLog
+    let payerEvents: EventLog
+    /// Offers the payee was asked about, and requests the payer was asked about.
     let offers: Counter
 }
 
 func connect(_ payer: Phone, _ payee: Phone, payerDistance: Double = 0.4, payeeDistance: Double = 0.4,
              payerTimeouts: PeerConnection.Timeouts = .init(), payeeTimeouts: PeerConnection.Timeouts = .init(),
-             decide: @escaping PeerConnection.Decide = { _ in true }) async throws -> Link {
+             decide: @escaping PeerConnection.Decide = { _ in true },
+             answerRequest: @escaping PeerConnection.DecideRequest = { _ in nil }) async throws -> Link {
     let toPayee = Wire(), toPayer = Wire()
-    let payeeEvents = EventLog(), offers = Counter()
+    let payeeEvents = EventLog(), payerEvents = EventLog(), offers = Counter()
     let a = PeerConnection(store: payer.store, signer: payer.signer, displayName: payer.name,
                            ranger: SimulatedPeerRanger(distanceMeters: payerDistance, seed: 1), timeouts: payerTimeouts,
-                           send: { toPayee.send($0) }, decide: { _ in false }, events: { _ in })
+                           send: { toPayee.send($0) }, decide: { _ in false },
+                           decideRequest: { request in offers.record(request); return await answerRequest(request) },
+                           events: { payerEvents.append($0) })
     let b = PeerConnection(store: payee.store, signer: payee.signer, displayName: payee.name,
                            ranger: SimulatedPeerRanger(distanceMeters: payeeDistance, seed: 2), timeouts: payeeTimeouts,
                            send: { toPayer.send($0) },
@@ -104,7 +115,8 @@ func connect(_ payer: Phone, _ payee: Phone, payerDistance: Double = 0.4, payeeD
         let introduced = (await a.peer, await b.peer)
         return introduced.0 != nil && introduced.1 != nil
     }
-    return Link(payer: a, payee: b, toPayee: toPayee, toPayer: toPayer, payeeEvents: payeeEvents, offers: offers)
+    return Link(payer: a, payee: b, toPayee: toPayee, toPayer: toPayer, payeeEvents: payeeEvents, payerEvents: payerEvents,
+                offers: offers)
 }
 
 func waitUntil(timeout: Duration = .seconds(3), _ condition: @Sendable () async throws -> Bool) async throws {

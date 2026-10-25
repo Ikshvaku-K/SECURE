@@ -30,6 +30,25 @@ public struct IncomingOffer: Equatable, Sendable, Identifiable {
     public let isRedelivery: Bool
 }
 
+/// A payment request from the other phone, waiting for this user's decision.
+public struct IncomingRequest: Equatable, Sendable, Identifiable {
+    public let id: OfferID
+    public let from: PeerIdentity
+    public let amount: Money
+    public let note: String?
+}
+
+/// The payer's answer to a request: the category to charge, and whether an over-budget warning was accepted.
+public struct RequestAnswer: Equatable, Sendable {
+    public var categoryID: Int64?
+    public var overrideOverBudget: Bool
+
+    public init(categoryID: Int64?, overrideOverBudget: Bool = false) {
+        self.categoryID = categoryID
+        self.overrideOverBudget = overrideOverBudget
+    }
+}
+
 public struct PeerPaymentOutcome: Sendable {
     public let entry: LedgerEntry
     public let receipt: SignedReceipt
@@ -65,7 +84,11 @@ public enum PeerEvent: Sendable {
     case step(PeerPaymentStep)
     case received(PeerReceiveOutcome)
     case receiveFailed(String)
-    /// The payer withdrew (or the decision timed out); dismiss the prompt for this offer.
+    /// This phone paid a request from the other phone.
+    case paid(PeerPaymentOutcome, to: PeerIdentity)
+    /// Paying a request from the other phone failed.
+    case payFailed(String)
+    /// The other phone withdrew an offer or request (or the decision timed out); dismiss its prompt.
     case offerWithdrawn(OfferID)
     case rangingUnavailable(String)
 }
@@ -80,10 +103,12 @@ public enum PeerEvent: Sendable {
 public actor PeerConnection {
     public typealias Send = @Sendable (Data) async throws -> Void
     public typealias Decide = @Sendable (IncomingOffer) async -> Bool
+    /// Nil declines the request.
+    public typealias DecideRequest = @Sendable (IncomingRequest) async -> RequestAnswer?
     public typealias Events = @Sendable (PeerEvent) -> Void
 
     public struct Timeouts: Sendable {
-        /// Waiting for a person to accept an offer or a re-delivery.
+        /// Waiting for a person to accept an offer, a request or a re-delivery.
         public var decision: Duration
         /// The payee waiting for the payer's Face ID and measurement.
         public var payerApproval: Duration
@@ -107,6 +132,7 @@ public actor PeerConnection {
     private let send: Send
     private let ranger: any PeerRanger
     private let decide: Decide
+    private let decideRequest: DecideRequest
     private let events: Events
     private nonisolated let inbox: AsyncStream<Data>.Continuation
     private var closed = false
@@ -114,10 +140,14 @@ public actor PeerConnection {
     private var activeIDs: Set<OfferID> = []
     private var mailbox: [OfferID: [PeerMessage]] = [:]
     private var waiters: [OfferID: (token: UUID, continuation: CheckedContinuation<PeerMessage, Error>)] = [:]
-    private var decisions: [OfferID: (once: Once, continuation: CheckedContinuation<Bool, Never>)] = [:]
+    /// Open prompts, by offer or request ID; `cancel` resolves one with its fallback answer.
+    private var decisions: [OfferID: (once: Once, cancel: @Sendable () -> Void)] = [:]
+    /// This phone's own outstanding request, resolved when the payer's payment completes or fails.
+    private var pendingRequest: (id: OfferID, amount: Money, continuation: CheckedContinuation<PeerReceiveOutcome, Error>)?
 
     public init(store: WalletStore, signer: any TransactionSigner, displayName: String, ranger: any PeerRanger,
-                timeouts: Timeouts = Timeouts(), send: @escaping Send, decide: @escaping Decide, events: @escaping Events) {
+                timeouts: Timeouts = Timeouts(), send: @escaping Send, decide: @escaping Decide,
+                decideRequest: @escaping DecideRequest = { _ in nil }, events: @escaping Events) {
         self.store = store
         self.signer = signer
         self.displayName = displayName
@@ -125,6 +155,7 @@ public actor PeerConnection {
         self.timeouts = timeouts
         self.send = send
         self.decide = decide
+        self.decideRequest = decideRequest
         self.events = events
         let (stream, continuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .bufferingNewest(64))
         inbox = continuation
@@ -149,8 +180,9 @@ public actor PeerConnection {
         inbox.finish()
         for (_, waiter) in waiters { waiter.continuation.resume(throwing: PeerError.notConnected) }
         waiters.removeAll()
-        for (_, decision) in decisions where decision.once.claim() { decision.continuation.resume(returning: false) }
+        for (_, decision) in decisions { decision.cancel() }
         decisions.removeAll()
+        resolveRequest(nil, with: .failure(PeerError.notConnected))
         await ranger.stop()
     }
 
@@ -159,12 +191,19 @@ public actor PeerConnection {
     /// Pays the connected phone. Budget and balance are checked before the other phone is contacted.
     public func pay(amount: Money, categoryID: Int64?, overrideOverBudget: Bool = false,
                     now: Date = Date()) async throws -> PeerPaymentOutcome {
-        guard let peer, !closed else { throw PeerError.notConnected }
+        guard peer != nil, !closed else { throw PeerError.notConnected }
         guard !busy else { throw PeerError.busy }
         busy = true
         let id = OfferID.random()
         activeIDs.insert(id)
         defer { finish(id) }
+        return try await runPayment(id, amount: amount, categoryID: categoryID, overrideOverBudget: overrideOverBudget, now: now)
+    }
+
+    /// The payer's steps. `id` is a fresh offer ID, or the ID of the request being answered.
+    private func runPayment(_ id: OfferID, amount: Money, categoryID: Int64?, overrideOverBudget: Bool,
+                            now: Date) async throws -> PeerPaymentOutcome {
+        guard let peer, !closed else { throw PeerError.notConnected }
         let myKey = signer.publicKey
 
         let verdict = try await store.evaluate(amount: amount, categoryID: categoryID, now: now)
@@ -286,10 +325,82 @@ public actor PeerConnection {
         return receipt
     }
 
+    // MARK: - Requests
+
+    /// Asks the connected phone to pay this amount. Returns once the payment has arrived and been countersigned;
+    /// this phone still approves with Face ID when it does. Throws if the payer declines or doesn't answer.
+    public func request(amount: Money, note: String? = nil) async throws -> PeerReceiveOutcome {
+        guard let peer, !closed else { throw PeerError.notConnected }
+        guard !busy, pendingRequest == nil else { throw PeerError.busy }
+        guard amount.minorUnits > 0 else { throw StoreError.blocked(.invalidAmount) }
+        busy = true
+        defer { busy = false }
+        let id = OfferID.random()
+        let message = PeerMessage.request(PaymentRequest(id: id, payee: signer.publicKey, payer: peer.walletKey,
+                                                         amount: amount, note: note))
+        events(.step(.waitingForPeer))
+        let timeout = timeouts.decision
+        return try await withCheckedThrowingContinuation { continuation in
+            pendingRequest = (id, amount, continuation)
+            Task {
+                do { try await self.transmit(message) } catch { self.resolveRequest(id, with: .failure(error)) }
+            }
+            Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                await self?.requestTimedOut(id)
+            }
+        }
+    }
+
+    /// No answer in time and no payment under way: withdraw the request so the payer's prompt closes.
+    private func requestTimedOut(_ id: OfferID) async {
+        guard pendingRequest?.id == id, !activeIDs.contains(id) else { return }
+        resolveRequest(id, with: .failure(PeerError.timedOut))
+        await abort(id, .cancelled, "\(displayName) withdrew the request.")
+    }
+
+    /// Ends this phone's outstanding request; `id` nil ends whichever is pending.
+    private func resolveRequest(_ id: OfferID?, with result: Result<PeerReceiveOutcome, Error>) {
+        guard let pending = pendingRequest, id == nil || pending.id == id else { return }
+        pendingRequest = nil
+        pending.continuation.resume(with: result)
+    }
+
+    /// The other phone asked this one to pay. The user picks a category and approves, or declines.
+    private func handleRequest(_ request: PaymentRequest) async {
+        guard let peer, !busy else {
+            try? await transmit(.failure(request.id, PeerFailure(.busy, "\(displayName) is busy with another payment.")))
+            return
+        }
+        guard request.payer == signer.publicKey, request.payee == peer.walletKey else {
+            await abort(request.id, .invalidMessage, "The request isn't addressed to this wallet.")
+            return
+        }
+        busy = true
+        activeIDs.insert(request.id)
+        defer { finish(request.id) }
+        let decideRequest = decideRequest
+        let incoming = IncomingRequest(id: request.id, from: peer, amount: request.amount, note: request.note)
+        guard let answer = await ask(request.id, fallback: nil, { await decideRequest(incoming) }) else {
+            await abort(request.id, .declined, "\(displayName) declined the request.")
+            return
+        }
+        do {
+            let outcome = try await runPayment(request.id, amount: request.amount, categoryID: answer.categoryID,
+                                               overrideOverBudget: answer.overrideOverBudget, now: Date())
+            events(.paid(outcome, to: peer))
+        } catch {
+            // Stops before the offer (budget, balance) still have to reach the payee; later steps already told it.
+            await abort(request.id, .rejected, PeerText.describe(error))
+            events(.payFailed(PeerText.describe(error)))
+        }
+    }
+
     // MARK: - Receiving
 
     private func handleOffer(_ offer: PaymentOffer) async {
-        guard let peer, !busy else {
+        let answersRequest = pendingRequest?.id == offer.id
+        guard let peer, !busy || answersRequest else {
             try? await transmit(.failure(offer.id, PeerFailure(.busy, "\(displayName) is busy with another payment.")))
             return
         }
@@ -297,8 +408,11 @@ public actor PeerConnection {
         activeIDs.insert(offer.id)
         defer { finish(offer.id) }
         do {
-            events(.received(try await receive(offer, from: peer)))
+            let outcome = try await receive(offer, from: peer)
+            resolveRequest(offer.id, with: .success(outcome))
+            events(.received(outcome))
         } catch {
+            resolveRequest(offer.id, with: .failure(error))
             events(.receiveFailed(PeerText.describe(error)))
         }
     }
@@ -310,8 +424,12 @@ public actor PeerConnection {
             throw PeerError.unexpectedMessage
         }
 
-        // 1. The user decides, then approves with Face ID before contributing to the nonce.
-        guard await ask(IncomingOffer(id: offer.id, from: peer, amount: offer.amount, isRedelivery: false)) else {
+        // 1. The user decides (unless this answers their own request for exactly this amount), then approves
+        //    with Face ID before contributing to the nonce.
+        let requested = pendingRequest.map { $0.id == offer.id && $0.amount == offer.amount } ?? false
+        let decide = decide
+        let incoming = IncomingOffer(id: offer.id, from: peer, amount: offer.amount, isRedelivery: false)
+        guard requested ? true : await ask(offer.id, fallback: false, { await decide(incoming) }) else {
             try? await transmit(.reply(OfferReply(id: offer.id, payeeContribution: nil)))
             throw PeerError.peer(PeerFailure(.declined, "Declined."))
         }
@@ -373,7 +491,9 @@ public actor PeerConnection {
                 await abort(id, .invalidMessage, "The payment isn't addressed to this wallet.")
                 throw PeerError.unexpectedMessage
             }
-            guard await ask(IncomingOffer(id: id, from: peer, amount: signed.transfer.amount, isRedelivery: true)) else {
+            let decide = decide
+            let incoming = IncomingOffer(id: id, from: peer, amount: signed.transfer.amount, isRedelivery: true)
+            guard await ask(id, fallback: false, { await decide(incoming) }) else {
                 await abort(id, .declined, "Declined.")
                 throw PeerError.peer(PeerFailure(.declined, "Declined."))
             }
@@ -437,23 +557,22 @@ public actor PeerConnection {
         return signed
     }
 
-    /// Asks the user, giving up after `timeouts.decision` or when the payer withdraws.
-    private func ask(_ offer: IncomingOffer) async -> Bool {
+    /// Asks the user, falling back after `timeouts.decision` or when the other phone withdraws.
+    private func ask<T: Sendable>(_ id: OfferID, fallback: T, _ body: @escaping @Sendable () async -> T) async -> T {
         let once = Once()
-        let decide = decide
         let events = events
         let timeout = timeouts.decision
-        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            decisions[offer.id] = (once, continuation)
+        return await withCheckedContinuation { (continuation: CheckedContinuation<T, Never>) in
+            decisions[id] = (once, { if once.claim() { continuation.resume(returning: fallback) } })
             Task {
-                let answer = await decide(offer)
+                let answer = await body()
                 if once.claim() { continuation.resume(returning: answer) }
             }
             Task {
                 try? await Task.sleep(for: timeout)
                 if once.claim() {
-                    continuation.resume(returning: false)
-                    events(.offerWithdrawn(offer.id))
+                    continuation.resume(returning: fallback)
+                    events(.offerWithdrawn(id))
                 }
             }
         }
@@ -486,13 +605,18 @@ public actor PeerConnection {
                     events(.rangingUnavailable(PeerText.describe(error)))
                 }
             }
+        case .request(let request):
+            Task { await handleRequest(request) }
         case .offer(let offer):
             Task { await handleOffer(offer) }
+        case .failure(let id?, let failure) where pendingRequest?.id == id && !activeIDs.contains(id):
+            // The payer declined this phone's request (or was busy) before any payment started.
+            resolveRequest(id, with: .failure(PeerError.peer(failure)))
         case .transfer(let id, let signed, let proof) where !activeIDs.contains(id):
             Task { await handleRedelivery(id, signed: signed, proof: proof) }
         case .failure(let id?, _) where decisions[id] != nil:
-            if let decision = decisions.removeValue(forKey: id), decision.once.claim() {
-                decision.continuation.resume(returning: false)
+            if let decision = decisions.removeValue(forKey: id) {
+                decision.cancel()
                 events(.offerWithdrawn(id))
             }
             fallthrough

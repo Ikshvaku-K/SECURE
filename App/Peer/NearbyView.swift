@@ -64,8 +64,9 @@ struct NearbyView: View {
         .onDisappear { nearby.stop() }
         .sheet(item: $payee) { phone in NearbyPaySheet(phone: phone) }
         .sheet(item: $nearby.incoming) { offer in IncomingOfferSheet(offer: offer) }
+        .sheet(item: $nearby.incomingRequest) { request in IncomingRequestSheet(request: request) }
         .overlay {
-            if let progress = nearby.progress, nearby.incoming == nil, payee == nil {
+            if let progress = nearby.progress, nearby.incoming == nil, nearby.incomingRequest == nil, payee == nil {
                 NearbyProgressCard(progress: progress)
             }
         }
@@ -105,11 +106,18 @@ struct NearbyPhoneRow: View {
 }
 
 struct NearbyPaySheet: View {
+    enum Mode: String, CaseIterable, Identifiable {
+        case pay = "Pay", request = "Request"
+        var id: Self { self }
+    }
+
     let phone: NearbyModel.Phone
     @Environment(AppModel.self) private var model
     @Environment(NearbyModel.self) private var nearby
     @Environment(\.dismiss) private var dismiss
+    @State private var mode: Mode = .pay
     @State private var amountText = ""
+    @State private var note = ""
     @State private var categoryID: Int64?
     @State private var verdict: BudgetVerdict?
     @State private var confirmingOverBudget = false
@@ -121,42 +129,54 @@ struct NearbyPaySheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Picker("Mode", selection: $mode) { ForEach(Mode.allCases) { Text($0.rawValue).tag($0) } }
+                    .pickerStyle(.segmented)
+                    .disabled(working)
                 Section("Amount") {
                     TextField("0.00", text: $amountText)
                         .keyboardType(.decimalPad)
                         .font(.system(size: 34, weight: .semibold, design: .rounded))
                         .focused($amountFocused)
                 }
-                Section("Category") {
-                    Picker("Category", selection: $categoryID) {
-                        Text("None").tag(Int64?.none)
-                        ForEach(model.categories) { category in
-                            Label(category.name, systemImage: category.iconName ?? "tag").tag(Int64?.some(category.id))
+                if mode == .pay {
+                    Section("Category") {
+                        Picker("Category", selection: $categoryID) {
+                            Text("None").tag(Int64?.none)
+                            ForEach(model.categories) { category in
+                                Label(category.name, systemImage: category.iconName ?? "tag").tag(Int64?.some(category.id))
+                            }
                         }
+                    }
+                } else {
+                    Section("Note") {
+                        TextField("What it's for (optional)", text: $note)
+                            .onChange(of: note) { if note.count > PaymentRequest.maxNoteLength { note = String(note.prefix(PaymentRequest.maxNoteLength)) } }
                     }
                 }
                 Section {
-                    LabeledContent("To", value: phone.name)
+                    LabeledContent(mode == .pay ? "To" : "From", value: phone.name)
                     LabeledContent("Wallet") { Text(phone.identity?.walletKey.fingerprint ?? "").font(.caption.monospaced()) }
                     if let progress = nearby.progress, working {
                         Label(NearbyProgressCard.text(for: progress), systemImage: NearbyProgressCard.icon(for: progress.step))
                     }
                 } footer: {
-                    Text("Check the wallet code with the other person. The category stays on this phone; they see the amount and both signed distance readings.")
+                    Text(mode == .pay
+                         ? "Check the wallet code with the other person. The category stays on this phone; they see the amount and both signed distance readings."
+                         : "They see the amount and your note, pick a category on their phone and approve with Face ID. You approve with Face ID when the payment arrives.")
                 }
-                if let verdict {
+                if mode == .pay, let verdict {
                     Section("Budget check") { VerdictView(verdict: verdict) }
                 }
             }
-            .navigationTitle("Pay nearby")
+            .navigationTitle(mode == .pay ? "Pay nearby" : "Request nearby")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(working) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { submit() } label: {
-                        if working { ProgressView() } else { Label("Send", systemImage: "faceid") }
+                        if working { ProgressView() } else if mode == .pay { Label("Send", systemImage: "faceid") } else { Text("Request") }
                     }
-                    .disabled(amount == nil || amount?.minorUnits == 0 || working || isBlocked)
+                    .disabled(amount == nil || amount?.minorUnits == 0 || working || (mode == .pay && isBlocked))
                 }
             }
             .interactiveDismissDisabled(working)
@@ -181,6 +201,16 @@ struct NearbyPaySheet: View {
 
     private func submit(overrideOverBudget: Bool = false) {
         guard let amount else { return }
+        if mode == .request {
+            working = true
+            amountFocused = false
+            Task {
+                let received = await nearby.request(phone.id, amount: amount, note: note)
+                working = false
+                if received { dismiss() }
+            }
+            return
+        }
         if case .overBudget = verdict, !overrideOverBudget {
             confirmingOverBudget = true
             return
@@ -232,6 +262,78 @@ struct IncomingOfferSheet: View {
         }
         .presentationDetents([.medium, .large])
         .interactiveDismissDisabled()
+    }
+}
+
+struct IncomingRequestSheet: View {
+    let request: IncomingRequest
+    @Environment(AppModel.self) private var model
+    @Environment(NearbyModel.self) private var nearby
+    @State private var categoryID: Int64?
+    @State private var verdict: BudgetVerdict?
+    @State private var confirmingOverBudget = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(request.from.displayName) requests").foregroundStyle(.secondary)
+                        Text(request.amount.formatted()).font(.system(size: 44, weight: .bold, design: .rounded)).monospacedDigit()
+                        if let note = request.note { Text("“\(note)”").font(.title3) }
+                    }
+                    .padding(.vertical, 4)
+                    LabeledContent("Wallet") { Text(request.from.walletKey.fingerprint).font(.caption.monospaced()) }
+                    if let phone = nearby.phones.first(where: { $0.identity?.walletKey == request.from.walletKey }) {
+                        LabeledContent("Distance", value: (phone.distance.map { $0.formatted(.number.precision(.fractionLength(2))) + " m" }
+                                                           ?? (phone.simulatedRanging ? "0.40 m" : "Measuring…"))
+                                       + (phone.simulatedRanging ? " (simulated)" : ""))
+                    }
+                }
+                Section("Category") {
+                    Picker("Category", selection: $categoryID) {
+                        Text("None").tag(Int64?.none)
+                        ForEach(model.categories) { category in
+                            Label(category.name, systemImage: category.iconName ?? "tag").tag(Int64?.some(category.id))
+                        }
+                    }
+                }
+                if let verdict {
+                    Section("Budget check") { VerdictView(verdict: verdict) }
+                }
+                Section {
+                    Button { pay() } label: { Label("Pay with Face ID", systemImage: "faceid") }
+                        .disabled(isBlocked)
+                    Button("Decline", role: .destructive) { nearby.answerRequest(nil) }
+                } footer: {
+                    Text("The category stays on this phone. Paying works like any nearby payment: both phones measure the distance and sign it, and you keep a countersigned receipt.")
+                }
+            }
+            .navigationTitle("Payment request")
+            .navigationBarTitleDisplayMode(.inline)
+            .task(id: categoryID) { verdict = await model.evaluate(amount: request.amount, categoryID: categoryID) }
+            .confirmationDialog("Over budget", isPresented: $confirmingOverBudget, titleVisibility: .visible) {
+                Button("Pay anyway", role: .destructive) { nearby.answerRequest(RequestAnswer(categoryID: categoryID, overrideOverBudget: true)) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This payment goes over your budget. Approving it still needs Face ID.")
+            }
+        }
+        .presentationDetents([.large])
+        .interactiveDismissDisabled()
+    }
+
+    private var isBlocked: Bool {
+        if case .blocked = verdict { return true }
+        return false
+    }
+
+    private func pay() {
+        if case .overBudget = verdict {
+            confirmingOverBudget = true
+            return
+        }
+        nearby.answerRequest(RequestAnswer(categoryID: categoryID))
     }
 }
 

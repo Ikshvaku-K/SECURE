@@ -17,6 +17,7 @@ Alongside the wallet, the app has a set of **simulated** add-ons: credit-score a
 - Category budgets (monthly, weekly, rolling, custom) with 80 % and 100 % alerts, soft caps with an explicit override, and hard caps.
 - Local notifications with Approve and Deny actions; a payment request opens an approval sheet.
 - **Phone-to-phone payments:** both people open *Pay or get paid nearby*. The phones find each other over Bluetooth and peer-to-peer Wi-Fi (MultipeerConnectivity), measure each other with UWB (NearbyInteraction), and both approve with Face ID. The payee checks everything before the payer commits, and the payer keeps a countersigned receipt. If the link drops after the payer commits, **Retry** re-sends the same signed payment; it can't be credited twice.
+- **Payment requests:** the payee can ask a nearby phone for an amount, with a note. The payer picks a category, sees its budget check and pays with Face ID, or declines.
 - Transfer protocol with a mutual spatial proof: each phone signs its own distance reading, and a payment needs both within 1 m and in agreement.
 
 **Additional features (simulated)**
@@ -36,7 +37,7 @@ Alongside the wallet, the app has a set of **simulated** add-ons: credit-score a
 | Phases 3–4: phone-to-phone payments with UWB | Implemented and verified on two Simulators; first run on two iPhones pending |
 | Phases 5–7: UI polish, hardening, distribution | Planned |
 
-Tests: **137** (Swift Testing), passing on macOS and on the iOS Simulator.
+Tests: **144** (Swift Testing), passing on macOS and on the iOS Simulator.
 
 ## Documentation
 
@@ -69,9 +70,9 @@ Tests: **137** (Swift Testing), passing on macOS and on the iOS Simulator.
 | `Packages/SecureKit/Sources/SecureCore` | Money, canonical encoding, hash chain, signed messages, spatial proof, budget engine, double-spend evidence (pure Swift) |
 | `Packages/SecureKit/Sources/SecureStore` | SQLCipher ledger (`WalletStore`), schema, Keychain chain anchor, in-process payment flow; `Connected/ConnectedStore` for the add-ons |
 | `Packages/SecureKit/Sources/SecureDevice` | Keychain, Secure Enclave signer, Simulator signer, notifications |
-| `Packages/SecureKit/Sources/SecurePeer` | The phone-to-phone payment protocol over any message link: messages, payer and payee steps, re-delivery |
+| `Packages/SecureKit/Sources/SecurePeer` | The phone-to-phone payment protocol over any message link: messages, payer and payee steps, requests, re-delivery |
 | `Packages/SecureKit/Sources/SecureConnect` | Credit tiers, simulated banks and markets, odds and strategy maths, responsible-play rules, strategy catalog |
-| `Packages/SecureKit/Tests` | 137 tests: SecureCore 52, SecureStore 30, SecurePeer 13, SecureConnect 42 |
+| `Packages/SecureKit/Tests` | 144 tests: SecureCore 52, SecureStore 30, SecurePeer 20, SecureConnect 42 |
 
 Each phone also has two in-process demo counterparties: "Demo Issuer" mints funds and "Demo Shop" receives payments, each with its own encrypted ledger and a simulated 0.40 m distance. That's how a single phone gets money to send to another.
 
@@ -95,7 +96,7 @@ App build for the Simulator:
 xcodebuild -project SECURE.xcodeproj -scheme SECURE -destination 'platform=iOS Simulator,name=iPhone 18 Pro' -derivedDataPath build/DerivedData build
 ```
 
-**Try a phone-to-phone payment:** on each device, Wallet ▸ *Receive $500 from Demo Issuer* (for the payer), then Wallet ▸ *Pay or get paid nearby*. Tap the other phone, enter an amount and tap Send. The other phone shows the offer; both approve with Face ID. Two Simulators on one Mac work too (they connect over loopback instead of Multipeer, and their distance readings are flagged simulated, which only debug builds accept).
+**Try a phone-to-phone payment:** on each device, Wallet ▸ *Receive $500 from Demo Issuer* (for the payer), then Wallet ▸ *Pay or get paid nearby*. Tap the other phone, enter an amount and tap Send (or switch to **Request** to ask them for money). The other phone shows the offer or request; both approve with Face ID. Two Simulators on one Mac work too (they connect over loopback instead of Multipeer, and their distance readings are flagged simulated, which only debug builds accept).
 
 Or open `SECURE.xcodeproj` in Xcode and run. On the Simulator, enroll Face ID first (Features ▸ Face ID ▸ Enrolled), then use Matching Face to approve payments. To try the practice markets, set a score in the Profile tab (or pick a demo persona) and confirm your age.
 

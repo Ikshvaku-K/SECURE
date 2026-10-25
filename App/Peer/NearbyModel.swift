@@ -31,6 +31,8 @@ final class NearbyModel {
     private(set) var progress: Progress?
     /// An offer from another phone waiting for this user's decision.
     var incoming: IncomingOffer?
+    /// A payment request from another phone waiting for this user's decision.
+    var incomingRequest: IncomingRequest?
     var displayName: String {
         didSet { UserDefaults.standard.set(displayName, forKey: Self.nameKey) }
     }
@@ -39,6 +41,7 @@ final class NearbyModel {
     private var link: (any NearbyLink)?
     private var connections: [MCPeerID: PeerConnection] = [:]
     private var decision: (id: OfferID, continuation: CheckedContinuation<Bool, Never>)?
+    private var requestDecision: (id: OfferID, continuation: CheckedContinuation<RequestAnswer?, Never>)?
 
     private static let nameKey = "nearbyDisplayName"
 
@@ -73,6 +76,7 @@ final class NearbyModel {
         phones.removeAll()
         isRunning = false
         resolveDecision(false)
+        resolveRequestDecision(nil)
     }
 
     // MARK: - Paying
@@ -106,6 +110,43 @@ final class NearbyModel {
         progress = nil
         await model?.nearbyPaymentFinished(verdict: nil)
         await refreshPending(phoneID)
+    }
+
+    // MARK: - Requesting
+
+    /// Asks a nearby phone to pay this amount. This phone approves with Face ID when the payment arrives.
+    func request(_ phoneID: MCPeerID, amount: Money, note: String?) async -> Bool {
+        guard let connection = connections[phoneID] else { return false }
+        do {
+            _ = try await connection.request(amount: amount, note: note)
+            // The "Received…" banner comes from the payment's own event.
+            progress = nil
+            return true
+        } catch {
+            progress = nil
+            model?.banner = Banner(kind: .error, text: PeerText.describe(error))
+            return false
+        }
+    }
+
+    /// The user's answer to an incoming request: a category (and over-budget approval) to pay, or nil to decline.
+    func answerRequest(_ answer: RequestAnswer?) {
+        incomingRequest = nil
+        resolveRequestDecision(answer)
+    }
+
+    private func askToPay(_ request: IncomingRequest) async -> RequestAnswer? {
+        resolveRequestDecision(nil)
+        return await withCheckedContinuation { continuation in
+            requestDecision = (request.id, continuation)
+            incomingRequest = request
+        }
+    }
+
+    private func resolveRequestDecision(_ answer: RequestAnswer?) {
+        guard let pending = requestDecision else { return }
+        requestDecision = nil
+        pending.continuation.resume(returning: answer)
     }
 
     // MARK: - Receiving
@@ -150,6 +191,10 @@ final class NearbyModel {
                 self.incoming = nil
                 resolveDecision(false)
             }
+            if let incomingRequest, incomingRequest.from.walletKey == key {
+                self.incomingRequest = nil
+                resolveRequestDecision(nil)
+            }
             if let gone, progress?.peerName == gone.name { progress = nil }
         case .received(let data, let peerID):
             connections[peerID]?.deliver(data)
@@ -171,6 +216,7 @@ final class NearbyModel {
             store: wallet, signer: signer, displayName: displayName, ranger: ranger,
             send: { [weak self] data in try await MainActor.run { try self?.link?.send(data, to: box.peerID) } },
             decide: { [weak self] offer in await self?.ask(offer) ?? false },
+            decideRequest: { [weak self] request in await self?.askToPay(request) ?? nil },
             events: { [weak self] event in Task { @MainActor in self?.handle(event, from: box.peerID) } })
     }
 
@@ -192,9 +238,22 @@ final class NearbyModel {
         case .receiveFailed(let reason):
             progress = nil
             if reason != "Declined." { model?.banner = Banner(kind: .error, text: reason) }
+        case .paid(let outcome, let payee):
+            progress = nil
+            model?.banner = Banner(kind: .success, text: "Paid \(outcome.entry.amount.formatted()) to \(payee.displayName) · \(outcome.distanceCM) cm apart")
+            Task { await model?.nearbyPaymentFinished(verdict: outcome.verdict) }
+        case .payFailed(let reason):
+            progress = nil
+            model?.banner = Banner(kind: .error, text: reason)
+            Task {
+                await model?.nearbyPaymentFinished(verdict: nil)
+                await refreshPending(peerID)
+            }
         case .offerWithdrawn(let id):
             if incoming?.id == id { incoming = nil }
             if decision?.id == id { resolveDecision(false) }
+            if incomingRequest?.id == id { incomingRequest = nil }
+            if requestDecision?.id == id { resolveRequestDecision(nil) }
             progress = nil
         case .rangingUnavailable(let reason):
             model?.banner = Banner(kind: .error, text: "Distance unavailable: \(reason)")

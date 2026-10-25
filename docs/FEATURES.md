@@ -20,7 +20,7 @@ Companion documents: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works), [DESIGN.
 | 2. Encrypted storage | 6 | 2 | 0 | 0 |
 | 3. Ledger and tamper evidence | 9 | 0 | 1 | 0 |
 | 4. Budgets | 9 | 0 | 3 | 0 |
-| 5. Transfers and proximity | 14 | 3 | 0 | 1 |
+| 5. Transfers and proximity | 14 | 4 | 0 | 1 |
 | 6. Double-spend detection | 5 | 0 | 0 | 1 |
 | 7. Approvals and notifications | 8 | 0 | 1 | 1 |
 | 8. App screens | 10 | 0 | 2 | 0 |
@@ -112,6 +112,7 @@ Companion documents: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works), [DESIGN.
 | 5.16 | Phone-to-phone transfers | The DESIGN §6 steps with each side on its own phone: offer, payee decision and Face ID, joint nonce, both measure and sign, payee "ready" for the exact amount, payer commits, transfer, countersigned receipt. | Done · device check | 13 tests in `SecurePeerTests`; two-Simulator walkthrough ($25, receipt countersigned); [PeerConnection.swift](../Packages/SecureKit/Sources/SecurePeer/PeerConnection.swift) |
 | 5.17 | Issuer mode in the app | One phone acts as the issuer and mints to others in person. | Planned · P4 | Demo Issuer covers it in-process today |
 | 5.18 | Nearby screen | Lists nearby phones with name, wallet code and live distance; pay sheet with budget check; incoming-offer sheet with Accept / Decline; step-by-step progress. | Done | [NearbyView.swift](../App/Peer/NearbyView.swift); Simulator walkthrough |
+| 5.19 | Payment requests | The payee asks a nearby phone for an amount, with an optional note. The payer sees the request with a category picker and live budget check, then pays with Face ID or declines. The payee's phone accepts the answering payment without asking again, only for exactly the requested amount, and still signs with Face ID. | Done · device check | 7 tests in `PaymentRequestTests`; two-Simulator walkthrough ($10 "Coffee" charged to Clothing) |
 
 ## 6. Double-spend detection
 
@@ -154,13 +155,13 @@ Companion documents: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works), [DESIGN.
 | 8.9 | Security screen | Signer type, wallet key, Face ID availability, SQLCipher version, file-encryption check (reads the file header), backup exclusion, integrity, entry count, tip link, re-verify, proximity policy. | Done | `DiagnosticsView` |
 | 8.10 | Status banners | Success and error messages that dismiss themselves after 4 s. | Done | `BannerView` |
 | 8.11 | Accessibility and appearance | System fonts (Dynamic Type), system colours (dark mode), a combined VoiceOver element for the balance, labelled icon buttons. | Partial (full VoiceOver and Dynamic Type audit in P5) | — |
-| 8.12 | Proximity view, send/request to real people | Sending to a nearby person with live distance is done (5.18). Still to come: requesting money, and a radar view with direction. | Partial | [NearbyView.swift](../App/Peer/NearbyView.swift) |
+| 8.12 | Proximity view, send/request to real people | Paying and requesting with a nearby person, with live distance, are done (5.18, 5.19). Still to come: a radar view with direction. | Partial | [NearbyView.swift](../App/Peer/NearbyView.swift) |
 
 ## 9. Developer tooling and quality
 
 | # | Feature | What it does | Status | Evidence / code |
 |---|---|---|---|---|
-| 9.1 | 137 automated tests | Swift Testing: 52 core, 29 store (encryption, integrity, budgets, rollback, double-spend, connected store), 13 phone-to-phone and 42 for the simulated add-ons. | Done | `swift test` (macOS) and `xcodebuild test` (iOS Simulator) both pass |
+| 9.1 | 144 automated tests | Swift Testing: 52 core, 30 store (encryption, integrity, budgets, rollback, double-spend, connected store), 20 phone-to-phone (payments, requests, messages) and 42 for the simulated add-ons. | Done | `swift test` (macOS) and `xcodebuild test` (iOS Simulator) both pass |
 | 9.2 | Runs on Mac and Simulator | The same suites run on macOS (fast) and on the iOS Simulator (real iOS SQLCipher binary). | Done | [README](../README.md) commands |
 | 9.3 | Attack simulations in tests | Tests copy and restore the database file and the "Keychain" to stage rollbacks, reinstalls, crashes and a full-restore double-spend. | Done | [StoreTestSupport.swift](../Packages/SecureKit/Tests/SecureStoreTests/StoreTestSupport.swift) |
 | 9.4 | Pinned dependency | The only third-party code is SQLCipher, pinned to exactly 4.19.0. The binary's checksum is pinned in its manifest and `Package.resolved` is kept. | Done | [Package.swift](../Packages/SecureKit/Package.swift) |

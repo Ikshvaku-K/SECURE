@@ -42,10 +42,11 @@ Tags: **[infra]** setup and plumbing · **[core]** PRD functionality · **[novel
 ## Phase 4 — Transfer protocol [novel]
 - [x] Joint session nonce, signed measurements, mutual spatial proof (built in Phase 1, now exchanged between phones)
 - [x] Transfer and receipt messages over the link (`SecurePeer`), payee "ready" for the exact amount, commit on both sides, in-flight re-delivery with Retry
-- [x] 13 tests; two-Simulator walkthrough ($25 paid, receipt countersigned)
+- [x] Payee-initiated payment requests with a note; the payer picks a category and sees its budget check (2026-10-25)
+- [x] 20 tests; two-Simulator walkthroughs ($25 paid, receipt countersigned; $10 "Coffee" requested and charged to Clothing)
 - [x] Peer table and double-spend evidence (Phase 1)
 - [ ] Evidence exchange between wallets when they meet
-- [ ] Payee-initiated requests; issuer mode on a phone
+- [ ] Issuer mode on a phone
 - Done when two phones complete a UWB-verified transfer approved with Face ID, and a staged database rollback is caught.
 
 ## Phase 5 — App UI [core]

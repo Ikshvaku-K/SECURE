@@ -93,7 +93,7 @@ In Phase 1 both sides of a transfer run in one process (`LoopbackPayment`) again
 | **Foundation** | iOS 26 SDK | Base library | `FileManager` (file protection, folders), `URLResourceValues` (backup exclusion), `Calendar` (budget windows, time zones, DST), `Decimal` + `FormatStyle` (money display), `UserDefaults` (alert de-duplication), `NSLock` | throughout |
 | **SQLCipher** | 4.19.0 community, on SQLite 3.53.4 | SQLite with transparent, authenticated page encryption; by Zetetic, BSD-style licence | The wallet database; used through SQLite's C API (`import SQLCipher`) | [SQLiteDatabase.swift](../Packages/SecureKit/Sources/SecureStore/SQLiteDatabase.swift), [§6.2](#62-sqlcipher) |
 | **CommonCrypto** | system | Apple's C crypto library | SQLCipher's crypto provider: AES, HMAC, PBKDF2, random IVs (measured: `cipher_provider = commoncrypto`) | indirect |
-| **Swift Testing** | Xcode 27.1 | `import Testing`, `@Test`, `#expect`, parameterized tests | 137 tests | `Packages/SecureKit/Tests` |
+| **Swift Testing** | Xcode 27.1 | `import Testing`, `@Test`, `#expect`, parameterized tests | 144 tests | `Packages/SecureKit/Tests` |
 | **Swift Package Manager** | tools version 6.2 | Package and dependency manager | `SecureKit` modules; pins SQLCipher | [Package.swift](../Packages/SecureKit/Package.swift) |
 | NearbyInteraction | iOS 27.1 SDK | UWB ranging between devices | **Planned (P3)**: real distance and direction | [§13.1](#131-uwb-ranging-with-nearbyinteraction) |
 | CoreBluetooth | iOS 27.1 SDK | Bluetooth LE GATT and L2CAP | **Planned (P3–P4)**: discovery-token exchange and protocol messages | [§13.2](#132-bluetooth-transport-with-corebluetooth) |
@@ -153,7 +153,7 @@ secure/
 │  ├─ Sources/SecureDevice/           Keychain, Secure Enclave, Face ID, notifications
 │  ├─ Sources/SecureConnect/          additional features: credit tiers, simulated banks and markets, strategies
 │  ├─ Sources/SecurePeer/             phone-to-phone payment protocol over any message link
-│  └─ Tests/                          SecureCoreTests (52), SecureConnectTests (42), SecureStoreTests (30), SecurePeerTests (13)
+│  └─ Tests/                          SecureCoreTests (52), SecureConnectTests (42), SecureStoreTests (30), SecurePeerTests (20)
 ├─ docs/                              PRD, DESIGN, ARCHITECTURE, FEATURES, ADDITIONAL-FEATURES, STRATEGIES
 ├─ PHASES.md · WORKLOG.md · README.md
 └─ .gitignore                         excludes build/, .build/, DerivedData, xcuserdata, secrets, *.sqlite
@@ -932,7 +932,7 @@ That package is a binary target (`SQLCipher.xcframework.zip`, 50.5 MB, a dynamic
 
 ### 12.3 Test architecture
 
-137 tests in Swift Testing: 69 for the wallet (below), 13 for phone-to-phone payments (`SecurePeerTests`: success, decline, budget stop before contact, distance rules, release builds rejecting simulated readings, amount mismatch, tampered transfer then re-delivery, lost receipt recovered without double credit, one payment per link, withdrawn offer, closed link, message encoding) and 55 for the additional features ([ADDITIONAL-FEATURES §10](ADDITIONAL-FEATURES.md#10-tests)). Each suite runs on macOS (`swift test`) and on the iOS Simulator (`xcodebuild test -scheme SecureKit-Package`).
+144 tests in Swift Testing: 69 for the wallet (below), 20 for phone-to-phone payments (`SecurePeerTests`: success, decline, budget stop before contact, distance rules, release builds rejecting simulated readings, amount mismatch, tampered transfer then re-delivery, lost receipt recovered without double credit, one payment per link, withdrawn offer, closed link; requests approved, declined, stopped by the payer's budget, approved over budget, not pre-approved for a changed amount, withdrawn, one at a time; message encoding) and 55 for the additional features ([ADDITIONAL-FEATURES §10](ADDITIONAL-FEATURES.md#10-tests)). Each suite runs on macOS (`swift test`) and on the iOS Simulator (`xcodebuild test -scheme SecureKit-Package`).
 
 | Suite | Tests | Covers |
 |---|---|---|

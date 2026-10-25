@@ -334,8 +334,9 @@ Two Simulators on one Mac can't complete a MultipeerConnectivity session, so Sim
 | # | From → to | Message | Contents and checks |
 |---|---|---|---|
 | 0 | both | `hello` | Wallet key, self-chosen name (unverified), NearbyInteraction discovery token for this link |
-| 1 | payer → payee | `offer` | Offer ID, both keys, amount, payer's nonce contribution. Sent only after the payer's budget and balance check. |
-| 2 | payee → payer | `reply` | Payee's nonce contribution if the user accepted **and** passed Face ID; otherwise declined |
+| 0a | payee → payer | `request` | Optional: the payee asks for an amount, with a short note (≤ 60 characters). The payer picks a category, sees its budget check and approves, or declines with a `failure`. |
+| 1 | payer → payee | `offer` | Offer ID, both keys, amount, payer's nonce contribution. Sent only after the payer's budget and balance check. When answering a request, the offer reuses the request's ID. |
+| 2 | payee → payer | `reply` | Payee's nonce contribution if the user accepted **and** passed Face ID; otherwise declined. An offer answering this phone's own request, for exactly the requested amount, skips the "Accept?" prompt but still needs Face ID. |
 | 3 | both | `measurement` | Each phone's signed UWB summary for the joint nonce. The receiver checks nonce, observer, subject and signature. |
 | 4 | payee → payer | `ready` | After `preflightIncoming` passes: proof, acceptance limits, payer record. **Repeats the agreed amount**; the payer won't commit if it differs. |
 | 5 | payer → payee | `transfer` | After the payer verifies the proof itself and commits its debit. The payee checks that the proof and amount match before `acceptTransfer`. |
@@ -345,12 +346,12 @@ Two Simulators on one Mac can't complete a MultipeerConnectivity session, so Sim
 **Money safety:**
 - Every refusal (budget, balance, limits, distance, disagreement, simulated reading on a release build, mismatched amount) happens before the payer's debit.
 - After the debit, a lost link leaves an *unconfirmed* payment, never a lost one. It stays in the payer's ledger without a receipt and is re-sent with **Retry**. The proof already contains the payee's own signed measurement from that session, so the payee only confirms with Face ID and countersigns. `acceptTransfer` is idempotent, so a re-delivery never credits twice.
-- One payment at a time per link. Decisions time out after 90 s; if the payer gives up, it withdraws the offer and the payee's prompt closes.
+- One payment or request at a time per link. Decisions time out after 90 s; whichever side gives up withdraws its offer or request, and the other phone's prompt closes.
+- A request never moves money by itself. The payer's normal checks (budget, balance, limits, Face ID) apply, and an over-budget request needs a deliberate "Pay anyway". If the offer's amount differs from what was requested, the payee is asked as for any offer.
 
 **Face ID timing.** The payee approves when accepting, before contributing to the nonce. The payer approves right after the reply. From then on every step runs at machine speed, well inside the 60-second signing session.
 
 **Open points** (for the hardening phase):
 - Bind the UWB reading to the wallet key. Today a phone measures the device holding the discovery token it was handed.
-- Requests initiated by the payee.
 - Fork-evidence exchange when phones meet.
 - Final distance thresholds from tape-measure runs on two iPhones.

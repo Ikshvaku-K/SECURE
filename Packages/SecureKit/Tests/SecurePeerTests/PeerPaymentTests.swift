@@ -209,6 +209,121 @@ struct PeerPaymentTests {
     }
 }
 
+@Suite("Payment requests")
+struct PaymentRequestTests {
+    @Test func thePayeeRequestsAndThePayerApproves() async throws {
+        let alice = try Phone("Alice"), bob = try Phone("Bob")
+        try await alice.fund(usd(500_00))
+        let link = try await connect(alice, bob, answerRequest: { _ in RequestAnswer(categoryID: nil) })
+
+        let outcome = try await link.payee.request(amount: usd(40_00), note: "  Lunch  ")
+
+        #expect(outcome.amount == usd(40_00))
+        #expect(outcome.from.displayName == "Alice")
+        #expect(await alice.store.balance() == usd(460_00))
+        #expect(await bob.store.balance() == usd(40_00))
+        #expect(link.offers.requests.map(\.note) == ["Lunch"])
+        #expect(link.offers.requests.map(\.amount) == [usd(40_00)])
+        // Answering its own request, the payee isn't asked again (it still signs with its key).
+        #expect(link.offers.offers.isEmpty)
+        try await waitUntil { link.payerEvents.paid.count == 1 }
+        let paid = try #require(link.payerEvents.paid.first)
+        #expect(try await alice.store.receipt(forEntryLink: paid.entry.link) != nil)
+    }
+
+    @Test func thePayerCanDecline() async throws {
+        let alice = try Phone("Alice"), bob = try Phone("Bob")
+        try await alice.fund(usd(500_00))
+        let link = try await connect(alice, bob)
+
+        await #expect(throws: PeerError.peer(PeerFailure(.declined, "Alice declined the request."))) {
+            try await link.payee.request(amount: usd(40_00))
+        }
+        #expect(await alice.store.balance() == usd(500_00))
+        #expect(await bob.store.balance() == usd(0))
+    }
+
+    @Test func theRequestFollowsThePayersBudget() async throws {
+        let alice = try Phone("Alice"), bob = try Phone("Bob")
+        try await alice.fund(usd(500_00))
+        let clothing = try await alice.store.addCategory(name: "Clothing")
+        try await alice.store.saveBudget(Budget(id: 0, categoryID: clothing.id, cap: usd(100_00), period: .monthly(anchorDay: 1)))
+        let link = try await connect(alice, bob, answerRequest: { _ in RequestAnswer(categoryID: clothing.id) })
+
+        do {
+            _ = try await link.payee.request(amount: usd(150_00))
+            Issue.record("expected the payer's budget to stop the request")
+        } catch PeerError.peer(let failure) {
+            #expect(failure.code == .rejected)
+            #expect(failure.message == PeerText.describe(StoreError.needsOverride(.ok([]))))
+        }
+        #expect(await alice.store.balance() == usd(500_00))
+        #expect(await bob.store.balance() == usd(0))
+    }
+
+    @Test func anOverBudgetRequestCanBeApprovedDeliberately() async throws {
+        let alice = try Phone("Alice"), bob = try Phone("Bob")
+        try await alice.fund(usd(500_00))
+        let clothing = try await alice.store.addCategory(name: "Clothing")
+        try await alice.store.saveBudget(Budget(id: 0, categoryID: clothing.id, cap: usd(100_00), period: .monthly(anchorDay: 1)))
+        let link = try await connect(alice, bob, answerRequest: { _ in RequestAnswer(categoryID: clothing.id, overrideOverBudget: true) })
+
+        _ = try await link.payee.request(amount: usd(150_00))
+        #expect(await bob.store.balance() == usd(150_00))
+        #expect(try await alice.store.budgetStatuses().first?.spentBefore == 150_00)
+    }
+
+    @Test func anOfferForADifferentAmountIsNotPreapproved() async throws {
+        let alice = try Phone("Alice"), bob = try Phone("Bob")
+        try await alice.fund(usd(500_00))
+        let link = try await connect(alice, bob, decide: { _ in false }, answerRequest: { _ in RequestAnswer(categoryID: nil) })
+        link.toPayee.setFilter { message in
+            guard case .offer(var offer) = message else { return message }
+            offer.amount = usd(400_00)
+            return .offer(offer)
+        }
+
+        await #expect(throws: PeerError.peer(PeerFailure(.declined, "Declined."))) {
+            try await link.payee.request(amount: usd(40_00))
+        }
+        // The payee was asked about the changed amount instead of accepting it silently.
+        #expect(link.offers.offers.map(\.amount) == [usd(400_00)])
+        #expect(await alice.store.balance() == usd(500_00))
+        #expect(await bob.store.balance() == usd(0))
+    }
+
+    @Test func aWithdrawnRequestClosesThePayersPrompt() async throws {
+        let alice = try Phone("Alice"), bob = try Phone("Bob")
+        try await alice.fund(usd(500_00))
+        let link = try await connect(alice, bob, payeeTimeouts: .init(decision: .milliseconds(200)), answerRequest: { _ in
+            try? await Task.sleep(for: .seconds(2))
+            return RequestAnswer(categoryID: nil)
+        })
+
+        await #expect(throws: PeerError.timedOut) {
+            try await link.payee.request(amount: usd(40_00))
+        }
+        try await waitUntil { link.payerEvents.withdrawn.count == 1 }
+        #expect(await alice.store.balance() == usd(500_00))
+    }
+
+    @Test func oneRequestAtATime() async throws {
+        let alice = try Phone("Alice"), bob = try Phone("Bob")
+        try await alice.fund(usd(500_00))
+        let link = try await connect(alice, bob, answerRequest: { _ in
+            try? await Task.sleep(for: .milliseconds(300))
+            return RequestAnswer(categoryID: nil)
+        })
+
+        let first = Task { try await link.payee.request(amount: usd(10_00)) }
+        try await Task.sleep(for: .milliseconds(50))
+        await #expect(throws: PeerError.busy) { try await link.payee.request(amount: usd(10_00)) }
+        await #expect(throws: PeerError.busy) { try await link.payee.pay(amount: usd(1_00), categoryID: nil) }
+        _ = try await first.value
+        #expect(await bob.store.balance() == usd(10_00))
+    }
+}
+
 @Suite("Peer messages")
 struct PeerMessageTests {
     @Test func everyMessageRoundTrips() async throws {
@@ -217,10 +332,14 @@ struct PeerMessageTests {
         let link = try await connect(alice, bob)
         _ = try await link.payer.pay(amount: usd(42_00), categoryID: nil)
         let messages = link.toPayee.messages + link.toPayer.messages
-            + [.failure(nil, PeerFailure(.busy, "Busy")), .reply(OfferReply(id: .random(), payeeContribution: nil))]
+            + [.failure(nil, PeerFailure(.busy, "Busy")), .reply(OfferReply(id: .random(), payeeContribution: nil)),
+               .request(PaymentRequest(id: .random(), payee: bob.signer.publicKey, payer: alice.signer.publicKey,
+                                       amount: usd(12_50), note: "Coffee")),
+               .request(PaymentRequest(id: .random(), payee: bob.signer.publicKey, payer: alice.signer.publicKey,
+                                       amount: usd(1), note: nil))]
 
         let kinds = Set(messages.map { String(describing: $0).prefix { $0 != "(" } })
-        #expect(kinds == ["hello", "offer", "reply", "measurement", "ready", "transfer", "receipt", "failure"])
+        #expect(kinds == ["hello", "offer", "reply", "measurement", "ready", "transfer", "receipt", "failure", "request"])
         for message in messages {
             #expect(try PeerMessage(encoded: message.encoded) == message)
         }
@@ -243,5 +362,16 @@ struct PeerMessageTests {
         let shortNonce = PeerMessage.offer(PaymentOffer(id: .random(), payer: SoftwareSigner().publicKey, payee: SoftwareSigner().publicKey,
                                                         amount: usd(5_00), payerContribution: Data([1, 2, 3])))
         #expect(throws: CanonicalError.invalidValue("contribution")) { try PeerMessage(encoded: shortNonce.encoded) }
+
+        var w = CanonicalWriter()
+        w.writeU8(PeerMessage.wireVersion)
+        w.writeU8(9)
+        w.writeFixed(OfferID.random().bytes)
+        SoftwareSigner().publicKey.encode(to: &w)
+        SoftwareSigner().publicKey.encode(to: &w)
+        w.writeI64(10_00)
+        w.writeString("USD")
+        w.writeOptional(String(repeating: "x", count: PaymentRequest.maxNoteLength + 1)) { $0.writeString($1) }
+        #expect(throws: CanonicalError.invalidValue("note")) { try PeerMessage(encoded: w.data) }
     }
 }
