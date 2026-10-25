@@ -17,12 +17,15 @@ struct SecureApp: App {
     @State private var model = AppModel()
     /// The additional features (credit score, accounts, markets) run beside the wallet with their own store.
     @State private var connected = ConnectedModel()
+    /// Phone-to-phone payments, active while the Nearby screen is open.
+    @State private var nearby = NearbyModel()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
                 .environment(connected)
+                .environment(nearby)
                 .task { await model.start() }
                 .task { await connected.start() }
         }

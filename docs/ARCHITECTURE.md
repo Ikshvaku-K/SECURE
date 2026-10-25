@@ -93,7 +93,7 @@ In Phase 1 both sides of a transfer run in one process (`LoopbackPayment`) again
 | **Foundation** | iOS 26 SDK | Base library | `FileManager` (file protection, folders), `URLResourceValues` (backup exclusion), `Calendar` (budget windows, time zones, DST), `Decimal` + `FormatStyle` (money display), `UserDefaults` (alert de-duplication), `NSLock` | throughout |
 | **SQLCipher** | 4.19.0 community, on SQLite 3.53.4 | SQLite with transparent, authenticated page encryption; by Zetetic, BSD-style licence | The wallet database; used through SQLite's C API (`import SQLCipher`) | [SQLiteDatabase.swift](../Packages/SecureKit/Sources/SecureStore/SQLiteDatabase.swift), [§6.2](#62-sqlcipher) |
 | **CommonCrypto** | system | Apple's C crypto library | SQLCipher's crypto provider: AES, HMAC, PBKDF2, random IVs (measured: `cipher_provider = commoncrypto`) | indirect |
-| **Swift Testing** | Xcode 27.1 | `import Testing`, `@Test`, `#expect`, parameterized tests | 123 tests | `Packages/SecureKit/Tests` |
+| **Swift Testing** | Xcode 27.1 | `import Testing`, `@Test`, `#expect`, parameterized tests | 137 tests | `Packages/SecureKit/Tests` |
 | **Swift Package Manager** | tools version 6.2 | Package and dependency manager | `SecureKit` modules; pins SQLCipher | [Package.swift](../Packages/SecureKit/Package.swift) |
 | NearbyInteraction | iOS 27.1 SDK | UWB ranging between devices | **Planned (P3)**: real distance and direction | [§13.1](#131-uwb-ranging-with-nearbyinteraction) |
 | CoreBluetooth | iOS 27.1 SDK | Bluetooth LE GATT and L2CAP | **Planned (P3–P4)**: discovery-token exchange and protocol messages | [§13.2](#132-bluetooth-transport-with-corebluetooth) |
@@ -141,16 +141,19 @@ secure/
 │  ├─ ApprovalSheet.swift             approve/deny a payment request
 │  ├─ BudgetEditorView.swift          create budgets and categories
 │  ├─ DetailViews.swift               transfer detail, measurement rows, Security screen
-│  └─ Connected/                      additional features: Accounts, Markets, Learn, Profile tabs
+│  ├─ Connected/                      additional features: Accounts, Markets, Learn, Profile tabs
+│  └─ Peer/                           phone-to-phone payments: Nearby screen, Multipeer link, UWB ranger
+├─ Config/Info.plist                  NearbyInteraction, local-network and Bonjour keys (merged with generated ones)
 ├─ Packages/SecureKit/                Swift package (tools 6.2)
-│  ├─ Package.swift                   4 libraries, 3 test targets, SQLCipher 4.19.0 (exact)
+│  ├─ Package.swift                   5 libraries, 4 test targets, SQLCipher 4.19.0 (exact)
 │  ├─ Package.resolved                pinned dependency state (committed)
 │  ├─ Sources/SecureCore/             pure logic: Foundation + CryptoKit only
 │  ├─ Sources/SecureStore/            SQLCipher persistence and the payment flow
 │  │  └─ Connected/                   ConnectedStore: the additional features' own encrypted database
 │  ├─ Sources/SecureDevice/           Keychain, Secure Enclave, Face ID, notifications
 │  ├─ Sources/SecureConnect/          additional features: credit tiers, simulated banks and markets, strategies
-│  └─ Tests/                          SecureCoreTests (52), SecureConnectTests (42), SecureStoreTests (29)
+│  ├─ Sources/SecurePeer/             phone-to-phone payment protocol over any message link
+│  └─ Tests/                          SecureCoreTests (52), SecureConnectTests (42), SecureStoreTests (30), SecurePeerTests (13)
 ├─ docs/                              PRD, DESIGN, ARCHITECTURE, FEATURES, ADDITIONAL-FEATURES, STRATEGIES
 ├─ PHASES.md · WORKLOG.md · README.md
 └─ .gitignore                         excludes build/, .build/, DerivedData, xcuserdata, secrets, *.sqlite
@@ -177,6 +180,8 @@ secure/
                    └────────────┘  chain, budgets, continuity, ranging protocol
 ```
 
+**Phone-to-phone payments.** `SecurePeer` depends on `SecureCore` and `SecureStore`. It carries the DESIGN §6 protocol between two phones over any message link, calling only `WalletStore`'s public steps. The app supplies the link (`MultipeerLink`) and the ranger (`NearbyRanger`). See [DESIGN §12](DESIGN.md#12-phone-to-phone-payments-v1).
+
 **Additional features.** `SecureConnect` (credit tiers, simulated banks and markets, odds and strategy maths, responsible-play rules) depends only on `SecureCore` value types. `SecureStore` depends on it for `ConnectedStore`, which keeps its own database; the wallet files (`WalletStore`, `LoopbackPayment`, the chain anchor) don't import it. See [ADDITIONAL-FEATURES.md](ADDITIONAL-FEATURES.md).
 
 `SecureCore` has no storage, UI or hardware dependency, so the whole protocol and budget engine can be unit-tested on a Mac in under a second. `SecureStore` adds SQLCipher; `SecureDevice` adds Apple's device frameworks. The two never depend on each other. The app wires them together, for example by handing a `KeychainSecretStore` from `SecureDevice` to a `WalletStore` from `SecureStore`.
@@ -187,9 +192,9 @@ secure/
 |---|---|---|---|
 | `TransactionSigner` + `SigningSession` (SecureCore) | Sign protocol messages after one approval | `SecureEnclaveSigner` / `SecureEnclaveSession` | `SimulatorBiometricSigner` (Simulator); `SoftwareSigner` / `SoftwareSigningSession` (tests, demo peers) |
 | `SecretStore` (SecureCore) | Small secrets: database key, anchor, key blob | `KeychainSecretStore` | `InMemorySecretStore` (with `snapshot()`/`restore()` to stage Keychain rollbacks in tests) |
-| `RangingSession` (SecureCore) | Measure distance to a peer during a session | NearbyInteraction adapter (**planned P3**) | `SimulatedRanging` (seedable, always flagged `simulated`) |
+| `RangingSession` (SecureCore), extended by `PeerRanger` (SecurePeer) | Measure distance to a peer during a session | `NearbyRanger`: one `NISession` per nearby phone ([NearbyRanger.swift](../App/Peer/NearbyRanger.swift)) | `SimulatedRanging`, `SimulatedPeerRanger` (seedable, always flagged `simulated`) |
 | `WalletStore` (SecureStore, concrete actor) | Encrypted ledger | SQLCipher file in Application Support | SQLCipher file in a temp folder; optional in-memory database |
-| Peer transport (**planned P3–P4**) | Carry messages between phones | CoreBluetooth GATT + L2CAP | `LoopbackPayment` (both sides in one process) |
+| `NearbyLink` (app) carrying `PeerConnection` (SecurePeer) | Carry messages between phones | `MultipeerLink`: MultipeerConnectivity over Bluetooth and peer-to-peer Wi-Fi | `LoopbackLink` (two Simulators, loopback TCP); in-memory `Wire` in tests; `LoopbackPayment` (both sides in one process) |
 
 ### 3.4 File map
 
@@ -880,7 +885,7 @@ Both use simulated ranging at 0.40 m. In Phase 4 they are replaced by a second p
 | `Library/Application Support/Wallet/wallet.sqlite-journal` | Transient rollback journal (exists only during a write) | Same; encrypted pages |
 | `Library/Application Support/DemoPeers/demo-issuer.sqlite`, `demo-shop.sqlite` | Demo counterparties' ledgers | Same |
 | `Library/Application Support/Connected/connected.sqlite` | Additional features: credit profile, simulated linked accounts and transactions, practice orders, positions and bets ([ADDITIONAL-FEATURES §8](ADDITIONAL-FEATURES.md#8-storage-and-encryption)) | SQLCipher (own key) + Data Protection Complete + excluded from backup |
-| `Library/Preferences/com.example.secure.plist` | `UserDefaults`: `postedBudgetAlerts` (budget ID, window start and level only; no amounts) | iOS default file protection |
+| `Library/Preferences/com.example.secure.plist` | `UserDefaults`: `postedBudgetAlerts` (budget ID, window start and level only; no amounts); `nearbyDisplayName` (the name shown to nearby phones); `nearbyNames` (wallet fingerprint → name other phones introduced themselves with) | iOS default file protection |
 
 **Keychain** (service `com.example.secure`; every item `WhenUnlockedThisDeviceOnly`):
 
@@ -893,7 +898,7 @@ Both use simulated ranging at 0.40 m. In Phase 4 they are replaced by a second p
 | `demo-shop.signing-key`, `.database-key`, `.chain-anchor` | Demo Shop's secrets | 32 / 32 / 73 bytes |
 | `connected.database-key` | SQLCipher raw key for `connected.sqlite` (additional features) | 32 bytes |
 
-Nothing is written outside the app's container, and nothing is sent off the device.
+Nothing is written outside the app's container. The only data that leaves the phone is the phone-to-phone protocol, sent directly to a nearby phone while the Nearby screen is open: the `hello` (wallet key, chosen name, discovery token) and, during a payment, the amount, signed measurements, the signed transfer and the receipt. The category never leaves the phone.
 
 ---
 
@@ -901,7 +906,7 @@ Nothing is written outside the app's container, and nothing is sent off the devi
 
 ### 12.1 Xcode project
 
-`SECURE.xcodeproj` is hand-written in the Xcode 16+ format (`objectVersion = 77`). The `App/` folder is a **file-system synchronized group**: any Swift file added to the folder joins the target automatically, so the project file never lists individual sources. The local package is attached with an `XCLocalSwiftPackageReference` to `Packages/SecureKit`, and the app links the `SecureCore`, `SecureStore` and `SecureDevice` products (`SecureConnect` comes in through `SecureStore`). Xcode embeds `SQLCipher.framework` in `SECURE.app/Frameworks` automatically (confirmed in the device build).
+`SECURE.xcodeproj` is hand-written in the Xcode 16+ format (`objectVersion = 77`). The `App/` folder is a **file-system synchronized group**: any Swift file added to the folder joins the target automatically, so the project file never lists individual sources. The local package is attached with an `XCLocalSwiftPackageReference` to `Packages/SecureKit`, and the app links the `SecureCore`, `SecureStore`, `SecureDevice` and `SecurePeer` products (`SecureConnect` comes in through `SecureStore`). `INFOPLIST_FILE = Config/Info.plist` adds the keys that can't be expressed as `INFOPLIST_KEY_` settings (the `NSBonjourServices` array). Xcode embeds `SQLCipher.framework` in `SECURE.app/Frameworks` automatically (confirmed in the device build).
 
 | Build setting | Value |
 |---|---|
@@ -919,15 +924,15 @@ Nothing is written outside the app's container, and nothing is sent off the devi
 ### 12.2 Swift package
 
 [Package.swift](../Packages/SecureKit/Package.swift) (tools 6.2, platforms iOS 26 / macOS 26) declares:
-- four library products (`SecureCore`, `SecureStore`, `SecureDevice`, `SecureConnect`);
-- three test targets;
+- five library products (`SecureCore`, `SecureStore`, `SecureDevice`, `SecureConnect`, `SecurePeer`);
+- four test targets;
 - one dependency, `https://github.com/sqlcipher/SQLCipher.swift.git`, pinned with `exact: "4.19.0"`.
 
 That package is a binary target (`SQLCipher.xcframework.zip`, 50.5 MB, a dynamic framework with iOS, Simulator, macOS, tvOS, watchOS and visionOS slices). Its download is verified against a SHA-256 checksum pinned in the upstream manifest. `Package.resolved` is committed, so every build resolves to the same revision.
 
 ### 12.3 Test architecture
 
-123 tests in Swift Testing: 69 for the wallet (below) and 54 for the additional features ([ADDITIONAL-FEATURES §10](ADDITIONAL-FEATURES.md#10-tests)). Each suite runs on macOS (`swift test`) and on the iOS Simulator (`xcodebuild test -scheme SecureKit-Package`).
+137 tests in Swift Testing: 69 for the wallet (below), 13 for phone-to-phone payments (`SecurePeerTests`: success, decline, budget stop before contact, distance rules, release builds rejecting simulated readings, amount mismatch, tampered transfer then re-delivery, lost receipt recovered without double credit, one payment per link, withdrawn offer, closed link, message encoding) and 55 for the additional features ([ADDITIONAL-FEATURES §10](ADDITIONAL-FEATURES.md#10-tests)). Each suite runs on macOS (`swift test`) and on the iOS Simulator (`xcodebuild test -scheme SecureKit-Package`).
 
 | Suite | Tests | Covers |
 |---|---|---|
@@ -997,7 +1002,7 @@ xcrun simctl spawn booted notifyutil -p com.apple.BiometricKit_Sim.pearl.nomatch
 
 ## 13. Planned architecture (Phases 3–4)
 
-None of this section is built yet. The APIs named here were checked against the iOS 27.1 SDK headers.
+**Status (2026-10-25):** phone-to-phone payments are built: NearbyInteraction ranging as planned in §13.1, but over a MultipeerConnectivity link instead of the CoreBluetooth design in §13.2 (decision and message flow in [DESIGN §12](DESIGN.md#12-phone-to-phone-payments-v1)). §13.2 is kept as the option for background requests. In-flight re-delivery from §13.3 is built; the rest of §13.3 is still planned. The APIs named here were checked against the iOS 27.1 SDK headers.
 
 ### 13.1 UWB ranging with NearbyInteraction
 
@@ -1018,7 +1023,7 @@ None of this section is built yet. The APIs named here were checked against the 
 
 ### 13.3 Protocol completion
 
-- `pending_transfers` will track sessions across disconnects; in-flight debits can be delivered again.
+- **Built:** in-flight debits are re-delivered from the ledger (debits without a receipt) with `PeerConnection.redeliver`; `pending_transfers` stays unused.
 - Fork evidence will be exchanged between wallets when they meet.
 - An issuer-mode screen will let one phone mint to others in person.
 - **Later options:** a two-key identity (an identity key endorsing a biometry-bound spending key), and ML-DSA-65 signatures in the Secure Enclave (algorithm byte `2`) for post-quantum security.

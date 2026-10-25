@@ -2,7 +2,7 @@
 
 **Spatial Enclave Cryptography for Untethered Reserves & Expenses**
 
-An offline-first iOS wallet. It signs transactions with a key held in the Secure Enclave, keeps an encrypted, hash-chained local ledger with category budgets, and is designed for peer-to-peer transfers verified by Ultra-Wideband proximity. It needs no internet connection and no servers.
+An offline-first iOS wallet. It signs transactions with a key held in the Secure Enclave, keeps an encrypted, hash-chained local ledger with category budgets, and pays phone to phone, with the distance between the phones measured by Ultra-Wideband and signed into every payment. It needs no internet connection and no servers.
 
 Alongside the wallet, the app has a set of **simulated** add-ons: credit-score access tiers, connected bank accounts in one dashboard, practice markets (stocks and ETFs, prediction markets, sports) and a guide to 27 trading, investing and betting strategies. They run in their own module and their own encrypted database and **don't change the wallet's transaction model**.
 
@@ -16,12 +16,13 @@ Alongside the wallet, the app has a set of **simulated** add-ons: credit-score a
 - Append-only, hash-chained ledger with a Keychain anchor that detects database rollbacks, plus signed evidence when an offline double-spend is attempted.
 - Category budgets (monthly, weekly, rolling, custom) with 80 % and 100 % alerts, soft caps with an explicit override, and hard caps.
 - Local notifications with Approve and Deny actions; a payment request opens an approval sheet.
-- Transfer protocol with a mutual spatial proof. Proximity is simulated until the UWB phase (see [PHASES.md](PHASES.md)).
+- **Phone-to-phone payments:** both people open *Pay or get paid nearby*. The phones find each other over Bluetooth and peer-to-peer Wi-Fi (MultipeerConnectivity), measure each other with UWB (NearbyInteraction), and both approve with Face ID. The payee checks everything before the payer commits, and the payer keeps a countersigned receipt. If the link drops after the payer commits, **Retry** re-sends the same signed payment; it can't be credited twice.
+- Transfer protocol with a mutual spatial proof: each phone signs its own distance reading, and a payment needs both within 1 m and in agreement.
 
 **Additional features (simulated)**
 - **Credit tiers:** a self-reported or demo credit score (300–850) sets how many practice-market transactions are allowed per day (3 to 50) and the largest single transaction ($100 to $2,500). Wallet transfers are never limited by the score.
 - **Connected accounts:** link three fictional banks, import and sync their history, and see net worth, assets, liabilities and spending by category in one place, with alerts for large spends and low balances.
-- **Practice markets:** $10,000 of practice money across stocks and ETFs (bid/ask spread, price charts), prediction markets (YES/NO contracts with an expected-value slider) and sports (moneyline odds with the bookmaker margin explained), with a portfolio and a simulated market clock.
+- **Practice markets:** $10,000 of practice money across stocks and ETFs (bid/ask spread, price charts) and prediction markets (YES/NO contracts with an expected-value slider), with a portfolio and a simulated market clock. Sports betting is built but **switched off for now** (`AppFeatures.sportsBetting`).
 - **Learn:** 27 strategies with how they work, examples, risks and complexity ([docs/STRATEGIES.md](docs/STRATEGIES.md)), plus expected-value, Kelly, DCA-backtest and Martingale calculators.
 - **Responsible play:** age confirmation (18+, or 21+ for sports), a daily stake limit, 24-hour and 7-day cool-offs, and a 30-day self-exclusion that can't be shortened.
 
@@ -32,9 +33,10 @@ Alongside the wallet, the app has a set of **simulated** add-ons: credit-score a
 | Phase 1: core engine | Done; runs on the iOS Simulator |
 | Phase 2: approvals | Implemented; Secure Enclave signing is waiting for a first run on a real iPhone |
 | Additional features | Done; simulated |
-| Phases 3–7: UWB ranging, phone-to-phone transfers, UI polish, hardening, distribution | Planned |
+| Phases 3–4: phone-to-phone payments with UWB | Implemented and verified on two Simulators; first run on two iPhones pending |
+| Phases 5–7: UI polish, hardening, distribution | Planned |
 
-Tests: **123** (Swift Testing), passing on macOS and on the iOS Simulator.
+Tests: **137** (Swift Testing), passing on macOS and on the iOS Simulator.
 
 ## Documentation
 
@@ -61,14 +63,17 @@ Tests: **123** (Swift Testing), passing on macOS and on the iOS Simulator.
 | Path | Contents |
 |---|---|
 | `SECURE.xcodeproj`, `App/` | SwiftUI app: the Wallet tab (balance, budgets, pay / receive / request flows, chain explorer, security diagnostics) |
+| `App/Peer/` | Phone-to-phone payments: Nearby screen, MultipeerConnectivity link, NearbyInteraction ranger (and a loopback link for two Simulators) |
+| `Config/Info.plist` | Nearby Interaction, local network and Bonjour keys |
 | `App/Connected/` | The Accounts, Markets, Learn and Profile tabs |
 | `Packages/SecureKit/Sources/SecureCore` | Money, canonical encoding, hash chain, signed messages, spatial proof, budget engine, double-spend evidence (pure Swift) |
 | `Packages/SecureKit/Sources/SecureStore` | SQLCipher ledger (`WalletStore`), schema, Keychain chain anchor, in-process payment flow; `Connected/ConnectedStore` for the add-ons |
 | `Packages/SecureKit/Sources/SecureDevice` | Keychain, Secure Enclave signer, Simulator signer, notifications |
+| `Packages/SecureKit/Sources/SecurePeer` | The phone-to-phone payment protocol over any message link: messages, payer and payee steps, re-delivery |
 | `Packages/SecureKit/Sources/SecureConnect` | Credit tiers, simulated banks and markets, odds and strategy maths, responsible-play rules, strategy catalog |
-| `Packages/SecureKit/Tests` | 123 tests: SecureCore 52, SecureConnect 42, SecureStore 29 |
+| `Packages/SecureKit/Tests` | 137 tests: SecureCore 52, SecureStore 30, SecurePeer 13, SecureConnect 42 |
 
-The current phase runs both sides of every wallet transfer in one process. "Demo Issuer" mints funds and "Demo Shop" receives payments; each has its own encrypted ledger. Proximity is simulated at 0.40 m until UWB arrives in Phase 3.
+Each phone also has two in-process demo counterparties: "Demo Issuer" mints funds and "Demo Shop" receives payments, each with its own encrypted ledger and a simulated 0.40 m distance. That's how a single phone gets money to send to another.
 
 ## Build, test, run
 
@@ -89,6 +94,8 @@ App build for the Simulator:
 ```bash
 xcodebuild -project SECURE.xcodeproj -scheme SECURE -destination 'platform=iOS Simulator,name=iPhone 18 Pro' -derivedDataPath build/DerivedData build
 ```
+
+**Try a phone-to-phone payment:** on each device, Wallet ▸ *Receive $500 from Demo Issuer* (for the payer), then Wallet ▸ *Pay or get paid nearby*. Tap the other phone, enter an amount and tap Send. The other phone shows the offer; both approve with Face ID. Two Simulators on one Mac work too (they connect over loopback instead of Multipeer, and their distance readings are flagged simulated, which only debug builds accept).
 
 Or open `SECURE.xcodeproj` in Xcode and run. On the Simulator, enroll Face ID first (Features ▸ Face ID ▸ Enrolled), then use Matching Face to approve payments. To try the practice markets, set a score in the Profile tab (or pick a demo persona) and confirm your age.
 

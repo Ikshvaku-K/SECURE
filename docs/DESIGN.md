@@ -3,6 +3,7 @@
 Draft v0.3 · 2026-10-24 · decisions D1–D3 made (§9): P-256 in the Secure Enclave, offline cash, core engine first · §5–6 updated to match the Phase 1 code
 Checked against Xcode 27.1 (27A9275), the iOS 27.1 SDK and Swift 6.4.
 Additional features (credit tiers, connected accounts, practice markets, strategies) are covered in §11 and [ADDITIONAL-FEATURES.md](ADDITIONAL-FEATURES.md).
+Phone-to-phone payments (built 2026-10-25) are covered in §12.
 
 ## 1. Summary
 
@@ -297,7 +298,7 @@ Still open, not blocking: what S.E.C.U.R.E stands for, and the bundle identifier
 
 ## 10. Platform notes
 
-- **Info.plist:** `NSFaceIDUsageDescription`, `NSNearbyInteractionUsageDescription`, `NSBluetoothAlwaysUsageDescription`, plus `NSCameraUsageDescription` if camera assistance is used. `UIBackgroundModes`: `bluetooth-central`, `bluetooth-peripheral`.
+- **Info.plist** ([Config/Info.plist](../Config/Info.plist), merged with the generated keys): `NSFaceIDUsageDescription`, `NSNearbyInteractionUsageDescription`, `NSLocalNetworkUsageDescription`, and `NSBonjourServices` (`_secure-pay._tcp`, `_secure-pay._udp`) for MultipeerConnectivity. No background modes: phone-to-phone UWB ranging only runs in the foreground, so both people keep the Nearby screen open.
 - **On-device builds:** sign in to Xcode ▸ Settings ▸ Accounts with an Apple ID. A free Personal Team works, but its profiles expire after 7 days. TestFlight needs the paid Apple Developer Program. Turn on Developer Mode on each iPhone under Settings ▸ Privacy & Security.
 - **iOS 27** adds Bluetooth Channel Sounding ranging to NearbyInteraction, but only through `NINearbyAccessoryConfiguration` (paired accessories). It could suit a merchant terminal without UWB later; it doesn't work phone to phone.
 - **Regulation:** if tokens stand for real money, money-transmission and e-money rules may apply. Option B, and option A used as closed-loop community credit, avoid that. Get a legal check before any public release.
@@ -316,3 +317,40 @@ Added after the PRD: credit-score access tiers, connected bank accounts in one d
 | Safeguards | Age confirmation (18+, 21+ for sports), daily stake limit, cool-offs and self-exclusion that can't be shortened | Practice should model safe habits, and the same controls would be required for real money |
 
 The full design is in [ADDITIONAL-FEATURES.md](ADDITIONAL-FEATURES.md) and the strategies in [STRATEGIES.md](STRATEGIES.md).
+
+## 12. Phone-to-phone payments (v1)
+
+Built 2026-10-25. The §6 protocol now runs with each side on its own phone. Nothing in the wallet changed: the new `SecurePeer` module calls only `WalletStore`'s public steps, the same ones `LoopbackPayment` uses.
+
+**Decision: MultipeerConnectivity instead of raw CoreBluetooth** (user decision, 2026-10-25). Reasons:
+- Phone-to-phone NearbyInteraction ranging only works with both apps in the foreground, so CoreBluetooth's background wake-up wouldn't help a payment.
+- MultipeerConnectivity finds peers and keeps encrypted, reliable sessions over Bluetooth and peer-to-peer Wi-Fi with no internet, in far less code. Apple's own NearbyInteraction sample uses it to exchange discovery tokens.
+- The link is untrusted either way: every message that matters is signed.
+
+Two Simulators on one Mac can't complete a MultipeerConnectivity session, so Simulator builds use a loopback TCP stand-in with the same interface. It is compiled out of device builds.
+
+**Messages** (`PeerMessage`, canonical encoding, version 1):
+
+| # | From → to | Message | Contents and checks |
+|---|---|---|---|
+| 0 | both | `hello` | Wallet key, self-chosen name (unverified), NearbyInteraction discovery token for this link |
+| 1 | payer → payee | `offer` | Offer ID, both keys, amount, payer's nonce contribution. Sent only after the payer's budget and balance check. |
+| 2 | payee → payer | `reply` | Payee's nonce contribution if the user accepted **and** passed Face ID; otherwise declined |
+| 3 | both | `measurement` | Each phone's signed UWB summary for the joint nonce. The receiver checks nonce, observer, subject and signature. |
+| 4 | payee → payer | `ready` | After `preflightIncoming` passes: proof, acceptance limits, payer record. **Repeats the agreed amount**; the payer won't commit if it differs. |
+| 5 | payer → payee | `transfer` | After the payer verifies the proof itself and commits its debit. The payee checks that the proof and amount match before `acceptTransfer`. |
+| 6 | payee → payer | `receipt` | Countersigned receipt; the payer stores it. |
+| — | either | `failure` | Code and plain-language reason, so both screens agree on why it stopped |
+
+**Money safety:**
+- Every refusal (budget, balance, limits, distance, disagreement, simulated reading on a release build, mismatched amount) happens before the payer's debit.
+- After the debit, a lost link leaves an *unconfirmed* payment, never a lost one. It stays in the payer's ledger without a receipt and is re-sent with **Retry**. The proof already contains the payee's own signed measurement from that session, so the payee only confirms with Face ID and countersigns. `acceptTransfer` is idempotent, so a re-delivery never credits twice.
+- One payment at a time per link. Decisions time out after 90 s; if the payer gives up, it withdraws the offer and the payee's prompt closes.
+
+**Face ID timing.** The payee approves when accepting, before contributing to the nonce. The payer approves right after the reply. From then on every step runs at machine speed, well inside the 60-second signing session.
+
+**Open points** (for the hardening phase):
+- Bind the UWB reading to the wallet key. Today a phone measures the device holding the discovery token it was handed.
+- Requests initiated by the payee.
+- Fork-evidence exchange when phones meet.
+- Final distance thresholds from tape-measure runs on two iPhones.

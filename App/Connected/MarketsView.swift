@@ -14,6 +14,8 @@ struct MarketsView: View {
     enum Segment: String, CaseIterable, Identifiable {
         case stocks = "Stocks & ETFs", predictions = "Predictions", sports = "Sports"
         var id: Self { self }
+
+        static var visible: [Segment] { AppFeatures.sportsBetting ? allCases : [.stocks, .predictions] }
     }
 
     @Environment(ConnectedModel.self) private var connected
@@ -33,7 +35,7 @@ struct MarketsView: View {
                     }
                     Section {
                         Picker("Market", selection: $segment) {
-                            ForEach(Segment.allCases) { Text($0.rawValue).tag($0) }
+                            ForEach(Segment.visible) { Text($0.rawValue).tag($0) }
                         }
                         .pickerStyle(.segmented)
                     }
@@ -442,14 +444,18 @@ struct PortfolioView: View {
                         LabeledContent(label(position), value: "\(position.markValue.formatted()) (\(signed(position.profit)))")
                     }
                 }
-                Section("Open bets") {
-                    if portfolio.openBets.isEmpty { Text("No open bets").foregroundStyle(.secondary) }
-                    ForEach(portfolio.openBets) { bet in LabeledContent(betLabel(bet), value: bet.stake.formatted()) }
+                if AppFeatures.sportsBetting || !portfolio.openBets.isEmpty {
+                    Section("Open bets") {
+                        if portfolio.openBets.isEmpty { Text("No open bets").foregroundStyle(.secondary) }
+                        ForEach(portfolio.openBets) { bet in LabeledContent(betLabel(bet), value: bet.stake.formatted()) }
+                    }
                 }
             }
-            Section("Settled bets") {
-                ForEach(connected.settledBets) { bet in
-                    LabeledContent(betLabel(bet), value: bet.status == .won ? "Won \(bet.payout.formatted())" : "Lost")
+            if AppFeatures.sportsBetting || !connected.settledBets.isEmpty {
+                Section("Settled bets") {
+                    ForEach(connected.settledBets) { bet in
+                        LabeledContent(betLabel(bet), value: bet.status == .won ? "Won \(bet.payout.formatted())" : "Lost")
+                    }
                 }
             }
             Section("History") {

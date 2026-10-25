@@ -10,6 +10,7 @@
 		5EC000000000000000000014 /* SecureCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC000000000000000000011 /* SecureCore */; };
 		5EC000000000000000000015 /* SecureStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC000000000000000000012 /* SecureStore */; };
 		5EC000000000000000000016 /* SecureDevice in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC000000000000000000013 /* SecureDevice */; };
+		5EC000000000000000000018 /* SecurePeer in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC000000000000000000017 /* SecurePeer */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 				5EC000000000000000000014 /* SecureCore in Frameworks */,
 				5EC000000000000000000015 /* SecureStore in Frameworks */,
 				5EC000000000000000000016 /* SecureDevice in Frameworks */,
+				5EC000000000000000000018 /* SecurePeer in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -77,6 +79,7 @@
 				5EC000000000000000000011 /* SecureCore */,
 				5EC000000000000000000012 /* SecureStore */,
 				5EC000000000000000000013 /* SecureDevice */,
+				5EC000000000000000000017 /* SecurePeer */,
 			);
 			productName = SECURE;
 			productReference = 5EC000000000000000000005 /* SECURE.app */;
@@ -199,6 +202,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "S.E.C.U.R.E";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID approves every payment and receipt this wallet signs.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -227,6 +231,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "S.E.C.U.R.E";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID approves every payment and receipt this wallet signs.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -293,6 +298,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5EC000000000000000000010 /* XCLocalSwiftPackageReference "Packages/SecureKit" */;
 			productName = SecureDevice;
+		};
+		5EC000000000000000000017 /* SecurePeer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5EC000000000000000000010 /* XCLocalSwiftPackageReference "Packages/SecureKit" */;
+			productName = SecurePeer;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

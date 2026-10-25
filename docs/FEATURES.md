@@ -1,6 +1,6 @@
 # S.E.C.U.R.E: Features
 
-As of 2026-10-24. Phase 1 (core engine) is complete. Phase 2 (approvals) is implemented and needs its first run on a real iPhone. Phases 3–7 are planned.
+As of 2026-10-25. Phase 1 (core engine) is complete. Phase 2 (approvals) is implemented and needs its first run on a real iPhone. Phone-to-phone payments (Phases 3–4) are implemented and verified on two Simulators; their first run on two iPhones is pending. Phases 5–7 are planned.
 Companion documents: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works), [DESIGN.md](DESIGN.md) (PRD review and decisions), [PRD.md](PRD.md) (original requirements), [ADDITIONAL-FEATURES.md](ADDITIONAL-FEATURES.md) and [STRATEGIES.md](STRATEGIES.md) (credit tiers, accounts, practice markets, strategies), [../PHASES.md](../PHASES.md) (plan).
 
 **Status labels**
@@ -20,10 +20,10 @@ Companion documents: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works), [DESIGN.
 | 2. Encrypted storage | 6 | 2 | 0 | 0 |
 | 3. Ledger and tamper evidence | 9 | 0 | 1 | 0 |
 | 4. Budgets | 9 | 0 | 3 | 0 |
-| 5. Transfers and proximity | 12 | 0 | 1 | 4 |
+| 5. Transfers and proximity | 14 | 3 | 0 | 1 |
 | 6. Double-spend detection | 5 | 0 | 0 | 1 |
 | 7. Approvals and notifications | 8 | 0 | 1 | 1 |
-| 8. App screens | 10 | 0 | 1 | 1 |
+| 8. App screens | 10 | 0 | 2 | 0 |
 | 9. Developer tooling and quality | 8 | 0 | 0 | 2 |
 | 10. Additional features (simulated) | 12 | 0 | 0 | 0 |
 
@@ -106,11 +106,12 @@ Companion documents: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works), [DESIGN.
 | 5.10 | Acceptance limit | Largest amount a wallet accepts from a peer in one offline transfer, capping exposure to a double-spender. | Done | Test `acceptanceLimitCapsExposure` |
 | 5.11 | Refused before debit | Budget, balance, limit and proximity failures all happen before the payer's debit, leaving the payer's balance untouched. | Done | Tests assert unchanged balances |
 | 5.12 | Simulated ranging | Stand-in for UWB on the Simulator and in tests: seeded noise, median and spread, always flagged `simulated`. | Done | `SimulatedRanging` |
-| 5.13 | In-flight transfers | A transfer whose receipt never arrived stays in flight and can be delivered again later (idempotent). | Partial (protocol supports it; transport and UI arrive with P4) | `pending_transfers` table reserved |
-| 5.14 | UWB ranging (NearbyInteraction) | Real centimetre-level distance, plus direction where the hardware supports it, between two iPhones. | Planned · P3 | [DESIGN §6](DESIGN.md#6-transfer-protocol-v1) |
-| 5.15 | Bluetooth transport | CoreBluetooth GATT and L2CAP to exchange discovery tokens and protocol messages. | Planned · P3–P4 | — |
-| 5.16 | Phone-to-phone transfers | The same protocol steps with each side on its own phone. | Planned · P4 | `LoopbackPayment` is the in-process template |
+| 5.13 | In-flight transfers | A payment whose receipt never arrived is listed under "Waiting for confirmation" and re-sent from the payer's ledger with Retry. The payee confirms with Face ID and countersigns; it is never credited twice. | Done | Tests `aTamperedTransferIsRefusedAndRedeliveredIntact`, `aLostReceiptIsRecoveredWithoutPayingTwice`; `PeerConnection.redeliver` |
+| 5.14 | UWB ranging (NearbyInteraction) | One `NISession` per nearby phone; discovery tokens travel in the link's `hello`. Live distance on screen; each payment summarises fresh samples (median, spread, direction when available) and signs them into the proof. | Done · device check | [NearbyRanger.swift](../App/Peer/NearbyRanger.swift); runs on the Simulator's NearbyInteraction emulation, flagged simulated |
+| 5.15 | Peer link (MultipeerConnectivity) | Finds nearby phones running the app over Bluetooth and peer-to-peer Wi-Fi, with no internet, and keeps an encrypted session with each. Untrusted: every payment message is signed. Two Simulators use a loopback stand-in. | Done · device check | [MultipeerLink.swift](../App/Peer/MultipeerLink.swift), [LoopbackLink.swift](../App/Peer/LoopbackLink.swift) |
+| 5.16 | Phone-to-phone transfers | The DESIGN §6 steps with each side on its own phone: offer, payee decision and Face ID, joint nonce, both measure and sign, payee "ready" for the exact amount, payer commits, transfer, countersigned receipt. | Done · device check | 13 tests in `SecurePeerTests`; two-Simulator walkthrough ($25, receipt countersigned); [PeerConnection.swift](../Packages/SecureKit/Sources/SecurePeer/PeerConnection.swift) |
 | 5.17 | Issuer mode in the app | One phone acts as the issuer and mints to others in person. | Planned · P4 | Demo Issuer covers it in-process today |
+| 5.18 | Nearby screen | Lists nearby phones with name, wallet code and live distance; pay sheet with budget check; incoming-offer sheet with Accept / Decline; step-by-step progress. | Done | [NearbyView.swift](../App/Peer/NearbyView.swift); Simulator walkthrough |
 
 ## 6. Double-spend detection
 
@@ -153,13 +154,13 @@ Companion documents: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works), [DESIGN.
 | 8.9 | Security screen | Signer type, wallet key, Face ID availability, SQLCipher version, file-encryption check (reads the file header), backup exclusion, integrity, entry count, tip link, re-verify, proximity policy. | Done | `DiagnosticsView` |
 | 8.10 | Status banners | Success and error messages that dismiss themselves after 4 s. | Done | `BannerView` |
 | 8.11 | Accessibility and appearance | System fonts (Dynamic Type), system colours (dark mode), a combined VoiceOver element for the balance, labelled icon buttons. | Partial (full VoiceOver and Dynamic Type audit in P5) | — |
-| 8.12 | Proximity view, send/request to real people | Visual radar while ranging, choosing a nearby person. | Planned · P5 | — |
+| 8.12 | Proximity view, send/request to real people | Sending to a nearby person with live distance is done (5.18). Still to come: requesting money, and a radar view with direction. | Partial | [NearbyView.swift](../App/Peer/NearbyView.swift) |
 
 ## 9. Developer tooling and quality
 
 | # | Feature | What it does | Status | Evidence / code |
 |---|---|---|---|---|
-| 9.1 | 69 automated tests | Swift Testing: 52 core tests (encoding, money, chain, budgets, proof, transfers, continuity) and 17 store tests (encryption, integrity, budgets, rollback, double-spend). | Done | `swift test` and `xcodebuild test` both pass |
+| 9.1 | 137 automated tests | Swift Testing: 52 core, 29 store (encryption, integrity, budgets, rollback, double-spend, connected store), 13 phone-to-phone and 42 for the simulated add-ons. | Done | `swift test` (macOS) and `xcodebuild test` (iOS Simulator) both pass |
 | 9.2 | Runs on Mac and Simulator | The same suites run on macOS (fast) and on the iOS Simulator (real iOS SQLCipher binary). | Done | [README](../README.md) commands |
 | 9.3 | Attack simulations in tests | Tests copy and restore the database file and the "Keychain" to stage rollbacks, reinstalls, crashes and a full-restore double-spend. | Done | [StoreTestSupport.swift](../Packages/SecureKit/Tests/SecureStoreTests/StoreTestSupport.swift) |
 | 9.4 | Pinned dependency | The only third-party code is SQLCipher, pinned to exactly 4.19.0. The binary's checksum is pinned in its manifest and `Package.resolved` is kept. | Done | [Package.swift](../Packages/SecureKit/Package.swift) |
@@ -185,7 +186,7 @@ Added after the PRD. They run beside the wallet in their own module (`SecureConn
 | 10.5 | Account alerts | Local notifications for debits of $500 or more and checking balances under $200 | Done | `largeTransactionsRaiseAlerts` |
 | 10.6 | Practice stocks and ETFs | Eight fictional instruments, a year of simulated prices, spread, charts, buy and sell | Done | `equityOrdersMoveCashAndPositions`, `SimulatorTests`; Simulator walkthrough |
 | 10.7 | Practice prediction markets | YES/NO contracts, probability chart, expected-value slider, settlement at 100¢ / 0¢ | Done | `contractsSettleOnTheirCloseDay`; Simulator walkthrough |
-| 10.8 | Practice sports betting | Fictional league, moneyline odds with a 4.5 % margin, bet slip explaining implied and fair odds, settlement | Done | `betsSettleAfterTheGame`; Simulator walkthrough (bet slip) |
+| 10.8 | Practice sports betting | Fictional league, moneyline odds with a 4.5 % margin, bet slip explaining implied and fair odds, settlement | Done · switched off for now (`AppFeatures.sportsBetting`) | `betsSettleAfterTheGame`; Simulator walkthrough (bet slip) |
 | 10.9 | Order checks | Self-exclusion, cool-off, score, age, tier count, tier size, daily stake limit, cash, in that order | Done | `MathAndPlayTests`; [ResponsiblePlay.swift](../Packages/SecureKit/Sources/SecureConnect/ResponsiblePlay.swift) |
 | 10.10 | Responsible play | Age confirmation, daily stake limit, 24-hour and 7-day cool-offs, 30-day self-exclusion that can't be shortened | Done | `coolOffBlocksBuyingButAllowsSellingAndCantBeShortened`, `exclusionsCanBeExtendedButNotShortened` |
 | 10.11 | Strategy guide | 27 strategies in four groups with how it works, example, when used, risks, complexity and availability | Done | `everyStrategyIsComplete`; [STRATEGIES.md](STRATEGIES.md) |
@@ -200,7 +201,7 @@ Each requirement from [PRD.md](PRD.md), what was built and how it differs. Reaso
 | Ed25519 key pairs stored in the Secure Enclave | P-256 ECDSA in the Secure Enclave (the Secure Enclave has no Ed25519) | Done · device check (changed by decision D1) |
 | SQLCipher with AES-256-GCM | SQLCipher 4.19.0: AES-256 pages with HMAC-SHA512 (authenticated, not GCM), plus iOS Data Protection | Done (wording corrected) |
 | State-locking: hash chain / hardware counter against rollback | Hash chain, Keychain anchor, rollback lock and fork evidence. A complete restore can't be stopped offline, only caught and limited. | Done (limit documented) |
-| UWB peer ranging with NearbyInteraction and CoreBluetooth | Simulated ranging with the same interface; real UWB next | Planned · P3 |
+| UWB peer ranging with NearbyInteraction and CoreBluetooth | NearbyInteraction ranging plus a MultipeerConnectivity link (Bluetooth and peer-to-peer Wi-Fi) instead of raw CoreBluetooth | Done · device check (transport changed, DESIGN §12) |
 | Spatial vector proof (azimuth, distance, sender, recipient, nonce, timestamp) | Mutual signed measurements: distance (median and spread), optional azimuth and vertical estimate, both keys, joint nonce, capability flags; the timestamp is on the signed transfer | Done (simulated input) |
 | Categories with monthly or rolling caps | Monthly, weekly, rolling and custom periods; soft and hard caps; multiple per category | Done |
 | Check balance and budget before signing | Before the Face ID prompt, and again inside the write transaction | Done |
@@ -227,7 +228,10 @@ Each requirement from [PRD.md](PRD.md), what was built and how it differs. Reaso
 - **A lost phone means a lost balance.** Keys can't leave the Secure Enclave and there is no server to restore from (decision D2).
 - **A payee can't verify the payer's balance offline.** It trusts the payer's signed chain position and caps its exposure with acceptance limits.
 - **The spatial proof only shows that both phones agreed they were close**, not where they were. Two colluding phones can both lie.
-- **Proximity is simulated** until Phase 3. Debug builds accept simulated proofs; release builds don't.
+- **Real UWB only on iPhones.** Phone-to-phone payments measure real distance with NearbyInteraction. The Simulator's readings and the Demo Shop flow are flagged simulated: debug builds accept them, release builds don't.
+- **Both people keep the Nearby screen open.** Phone-to-phone UWB ranging only runs in the foreground, and the link only runs while that screen is visible.
+- **Names on the Nearby screen are self-chosen.** Compare the wallet code (fingerprint) with the other person before paying.
+- **The UWB reading isn't yet bound to the wallet key.** A phone measures the device holding the discovery token it was given; an honest payee far away still can't complete a payment, but two colluding phones can (see the spatial-proof limit above).
 - **Budget windows use the phone's clock**, which the owner can change. Ordering and integrity use sequence numbers, not time.
-- **Pending payment requests are held in memory** in Phase 1 and lost if the app is terminated. Phase 4 persists them in `pending_transfers`.
+- **Demo payment requests are held in memory** and lost if the app is terminated. Unconfirmed phone-to-phone payments are safe: they are rebuilt from the ledger and re-sent with Retry.
 - **Notification text (amounts, category names) can appear on the lock screen**, depending on the phone's notification preview setting.

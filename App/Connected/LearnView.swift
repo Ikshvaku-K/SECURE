@@ -16,7 +16,7 @@ struct LearnView: View {
                     NavigationLink { DCABacktestView() } label: { Label("DCA backtest", systemImage: "calendar") }
                     NavigationLink { MartingaleSimulatorView() } label: { Label("Martingale simulator", systemImage: "exclamationmark.triangle") }
                 }
-                ForEach(Strategy.Group.allCases, id: \.self) { group in
+                ForEach(Strategy.Group.allCases.filter { $0 != .sports || AppFeatures.sportsBetting }, id: \.self) { group in
                     Section(group.title) {
                         ForEach(StrategyCatalog.strategies(in: group)) { strategy in
                             NavigationLink { StrategyDetailView(strategy: strategy) } label: { StrategyRow(strategy: strategy) }

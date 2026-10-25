@@ -26,23 +26,26 @@ Tags: **[infra]** setup and plumbing · **[core]** PRD functionality · **[novel
 - [x] `SecureConnect` module and `ConnectedStore` in their own encrypted database; the core transactions model is unchanged
 - [x] Credit score (self-reported or demo) with five tiers limiting practice transactions per day and size
 - [x] Connected accounts: three fictional banks, history import, sync, net worth and spending dashboard, alerts
-- [x] Practice markets: stocks and ETFs, prediction markets, sports, portfolio and a simulated market clock
+- [x] Practice markets: stocks and ETFs, prediction markets, sports, portfolio and a simulated market clock (sports switched off for now, 2026-10-25)
 - [x] Strategy guide (27 strategies) and four calculators
 - [x] Responsible play: age, daily stake limit, cool-offs, self-exclusion
-- [x] 54 tests (123 in total); Simulator walkthrough of the Accounts, Markets and Profile tabs
+- [x] 55 tests; Simulator walkthrough of the Accounts, Markets and Profile tabs
 - See [docs/ADDITIONAL-FEATURES.md](docs/ADDITIONAL-FEATURES.md).
 
-## Phase 3 — Proximity spike with two iPhones [novel]
-- [ ] CoreBluetooth link for exchanging discovery tokens
-- [ ] NISession peer ranging between two UWB iPhones; log distance, direction, horizontal angle and capability flags
+## Phase 3 — Proximity with two iPhones [novel]
+- [x] Link for exchanging discovery tokens: MultipeerConnectivity instead of CoreBluetooth (decision 2026-10-25, [DESIGN §12](docs/DESIGN.md#12-phone-to-phone-payments-v1)); loopback stand-in for two Simulators
+- [x] NISession peer ranging, one session per nearby phone; live distance on screen; direction and vertical estimate recorded when available
+- [ ] First run on two iPhones
 - [ ] Check against a tape measure at 0.25, 0.5, 1, 2 and 3 m: error, spread, time to first fix, and direction availability with and without camera assistance
 - Done when a measurement report sets the proof thresholds (distance limit, agreement tolerance).
 
 ## Phase 4 — Transfer protocol [novel]
-- [ ] Joint session nonce, signed measurements, mutual spatial proof
-- [ ] Transfer and receipt messages, atomic commit on both sides, in-flight handling
-- [ ] Peer table and double-spend evidence; optional evidence exchange between wallets
-- [ ] Issuer and mint flow (if D2 is offline cash)
+- [x] Joint session nonce, signed measurements, mutual spatial proof (built in Phase 1, now exchanged between phones)
+- [x] Transfer and receipt messages over the link (`SecurePeer`), payee "ready" for the exact amount, commit on both sides, in-flight re-delivery with Retry
+- [x] 13 tests; two-Simulator walkthrough ($25 paid, receipt countersigned)
+- [x] Peer table and double-spend evidence (Phase 1)
+- [ ] Evidence exchange between wallets when they meet
+- [ ] Payee-initiated requests; issuer mode on a phone
 - Done when two phones complete a UWB-verified transfer approved with Face ID, and a staged database rollback is caught.
 
 ## Phase 5 — App UI [core]

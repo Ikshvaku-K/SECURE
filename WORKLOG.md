@@ -73,3 +73,17 @@
 - After the rename: 123 tests pass on macOS and on the iPhone 18 Pro Simulator; the app builds.
 - Added `docs/ADDITIONAL-FEATURES.md`, `docs/STRATEGIES.md` (generated from `StrategyCatalog` by a throwaway test, so it matches the app word for word), the MIT `LICENSE`, and updated README, DESIGN, FEATURES, ARCHITECTURE and PHASES for the add-ons.
 
+## 2026-10-25 — Sports switched off; phone-to-phone payments
+
+- **Sports betting switched off for now** (user request). `AppFeatures.sportsBetting = false` hides the Sports segment, the six sports strategies and the bet history; `ConnectedStore(enabledMarkets:)` refuses bets with `.marketClosed`. The engine and its tests stay; new test `aSwitchedOffMarketRefusesOrders`.
+- **Phone-to-phone payments** (user decisions: MultipeerConnectivity as the link; the first milestone is a full payment, not a distance-only spike).
+  - New package module `SecurePeer`: `PeerMessage` (versioned canonical encoding), `PeerConnection` (payer and payee steps, mailbox with timeouts, one payment per link, offer withdrawal, re-delivery), `PeerRanger`, `PeerText`. It uses only `WalletStore`'s public steps; no wallet code changed.
+  - Safety rules added while building: the payee's `ready` repeats the agreed amount, and the payer won't commit if it differs; the payee checks that the transfer's proof and amount match the offer before accepting; if the payer stops waiting, it withdraws the offer so the payee's prompt closes.
+  - App: `MultipeerLink` (auto-connects to nearby phones while the Nearby screen is open; tie-break on a random instance ID so only one side invites), `NearbyRanger` (one `NISession` per phone, tokens in the `hello`, live distance, ≥10 fresh samples or 3 over 1.5 s per payment), `NearbyModel`, `NearbyView` (phones with wallet code and live distance, pay sheet with budget check, incoming-offer sheet, progress card, "Waiting for confirmation" with Retry). `Config/Info.plist` adds the NearbyInteraction, local-network and Bonjour keys. Wallet tab gets a *Pay or get paid nearby* row; `AppModel` exposes the wallet and signer to it and names peers from the `hello`.
+  - Tests: 13 in `SecurePeerTests` (all passing 20 times in a row), 137 in total, passing on macOS and the iPhone 18 Pro Simulator. The app builds with no warnings for the Simulator and for a generic iOS device.
+- Two-Simulator walkthrough (iPhone 18 Pro and iPhone 18 Pro Max):
+  - **MultipeerConnectivity can't connect two Simulators on one Mac.** Each found the other, but invitations timed out (the listener logged `Failed to set SO_NOSIGPIPE` on the accepted socket). Added `LoopbackLink`, a Simulator-only loopback TCP link with the same interface; it is compiled out of device builds.
+  - **The Simulator emulates NearbyInteraction** (`supportsPreciseDistanceMeasurement` is true, distance 0 m). Its readings were first treated as real UWB, which a release build would have accepted; they are now flagged `.simulated`, so the real ranger code runs in the Simulator but only debug builds accept the result.
+  - Result: both phones listed each other with matching wallet codes and live (simulated) distance; $25 sent from the first to the second; the payee saw the offer, both approved with Face ID (`notifyutil` match events); the payer's entry shows *Receipt: Countersigned* and a spatial proof with 10 samples per side; balances $295 and $25, both chains verified.
+- Not verified yet: Multipeer and UWB on two real iPhones, and the distance thresholds against a tape measure.
+

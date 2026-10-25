@@ -17,6 +17,9 @@ struct HomeView: View {
                 }
 
                 Section {
+                    NavigationLink { NearbyView() } label: {
+                        Label("Pay or get paid nearby", systemImage: "iphone.radiowaves.left.and.right")
+                    }
                     Button { showingPay = true } label: {
                         Label("Pay \(DemoPeer.shopName)", systemImage: "wave.3.right")
                     }
@@ -31,7 +34,7 @@ struct HomeView: View {
                         Label("Simulate a payment request", systemImage: "bell.badge")
                     }
                 } footer: {
-                    Text("Proximity is simulated at 0.40 m until UWB ranging arrives in Phase 3.")
+                    Text("Nearby payments measure the real distance with UWB on iPhone (simulated in the Simulator). Demo Shop payments use a simulated 0.40 m.")
                 }
                 .disabled(model.integrity.isLocked || working)
 

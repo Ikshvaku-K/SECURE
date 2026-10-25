@@ -554,6 +554,8 @@ The 27 strategies shown in the app's **Learn** tab, grouped by market. This file
 
 ## Sports betting
 
+> Sports betting is switched off in the app for now, so these six strategies are hidden in the Learn tab. The Kelly and Martingale calculators stay, since they apply to any bet.
+
 <a id="value-betting"></a>
 ### Value betting
 

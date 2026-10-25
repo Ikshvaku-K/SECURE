@@ -174,7 +174,7 @@ final class AppModel {
         guard let key else { return "Wallet created" }
         if key == issuer?.signer.publicKey { return DemoPeer.issuerName }
         if key == shop?.signer.publicKey { return DemoPeer.shopName }
-        return key.fingerprint
+        return NearbyNames.name(for: key) ?? key.fingerprint
     }
 
     // MARK: - Actions
@@ -255,6 +255,20 @@ final class AppModel {
         let status = (try? await wallet.reverify()) ?? .anchorMissing
         banner = status.isLocked ? Banner(kind: .error, text: Self.describe(StoreError.walletLocked(status)))
                                  : Banner(kind: .success, text: "Chain verified: \(await wallet.entryCount) entries")
+        await refresh()
+    }
+
+    // MARK: - Nearby payments
+
+    /// The wallet and its signer, for paying and being paid by a phone next to this one (`NearbyModel`).
+    var nearbyAccess: (wallet: WalletStore, signer: any TransactionSigner)? {
+        guard let wallet, let signer, !integrity.isLocked else { return nil }
+        return (wallet, signer)
+    }
+
+    /// After a phone-to-phone payment: budget alerts for the payer, then fresh balances and activity.
+    func nearbyPaymentFinished(verdict: BudgetVerdict?) async {
+        if let verdict { await alertIfNeeded(verdict) }
         await refresh()
     }
 

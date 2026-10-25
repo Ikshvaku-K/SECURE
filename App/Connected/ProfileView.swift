@@ -150,7 +150,7 @@ struct ResponsiblePlaySection: View {
         } header: {
             Text("Responsible play")
         } footer: {
-            Text("Practice money only. Stocks and prediction markets need 18+, sports 21+. Cool-offs and self-exclusion can't be shortened once started. If betting stops being fun, the National Council on Problem Gambling (ncpgambling.org) can help.")
+            Text("Practice money only. Practice markets need 18+\(AppFeatures.sportsBetting ? ", sports 21+" : ""). Cool-offs and self-exclusion can't be shortened once started. If betting stops being fun, the National Council on Problem Gambling (ncpgambling.org) can help.")
         }
     }
 }

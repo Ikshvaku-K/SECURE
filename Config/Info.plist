@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyLists-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_secure-pay._tcp</string>
+		<string>_secure-pay._udp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Finds nearby phones running S.E.C.U.R.E so you can pay them directly, with no internet connection.</string>
+	<key>NSNearbyInteractionUsageDescription</key>
+	<string>Measures the distance to the other phone, so a payment only goes through when the two phones are next to each other.</string>
+</dict>
+</plist>

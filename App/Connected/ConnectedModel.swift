@@ -237,6 +237,7 @@ final class ConnectedModel {
 /// Opens the connected-features database off the main thread, in its own folder and with its own Keychain key.
 nonisolated enum ConnectedBootstrap {
     static func open(secrets: KeychainSecretStore) throws -> ConnectedStore {
-        try ConnectedStore(directory: try WalletLocation.directory(named: "Connected"), secrets: secrets)
+        try ConnectedStore(directory: try WalletLocation.directory(named: "Connected"), secrets: secrets,
+                           enabledMarkets: AppFeatures.enabledMarkets)
     }
 }

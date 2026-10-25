@@ -40,7 +40,7 @@ The wallet (Secure Enclave keys, the hash-chained SQLCipher ledger, budgets, tra
 | Accounts | Connected accounts | Links fictional banks, imports 60 days of history, syncs new transactions, shows net worth, assets and liabilities, spending by category this month and per-account detail. Large spends and low checking balances raise local notifications. |
 | Markets | Stocks & ETFs | Six fictional stocks and two ETFs with a year of simulated daily prices, a bid/ask spread, charts and buy/sell orders. |
 | Markets | Prediction markets | Fictional YES/NO events priced 1–99¢. A probability chart, an expected-value slider ("your estimate vs the market") and settlement at 100¢ or 0¢ when the event closes. |
-| Markets | Sports | A fictional eight-team league ("Harbor League (simulated)") with moneyline odds, a bet slip that explains implied and fair probabilities and the bookmaker margin, and settlement after each game. |
+| Markets | Sports (**switched off for now**) | A fictional eight-team league ("Harbor League (simulated)") with moneyline odds, a bet slip that explains implied and fair probabilities and the bookmaker margin, and settlement after each game. Hidden in the app and refused by the store while `AppFeatures.sportsBetting` is `false`; the engine and its tests stay. |
 | Markets | Portfolio | Cash, positions with profit and loss, open bets and full order history. "Next day" advances the simulated market clock; "Reset practice account" starts over with $10,000. |
 | Learn | Strategy guide | 27 strategies in four groups, each with how it works, an example, when it is used, risks, complexity, horizon and whether it can be tried in the app ([STRATEGIES.md](STRATEGIES.md)). |
 | Learn | Calculators | Expected value (contract price or betting odds), Kelly bet size, a dollar-cost-averaging backtest on simulated prices and a Martingale Monte Carlo simulator (2,000 sessions). |
@@ -110,6 +110,8 @@ Every user starts with **$10,000 in practice money**. Prices are a pure function
 - The contract screen shows the market's implied chance and lets the user set their own estimate to see the edge per contract for YES and NO.
 
 ### 5.3 Sports
+
+> **Switched off for now (2026-10-25).** `AppFeatures.sportsBetting = false` in [AppFeatures.swift](../App/Connected/AppFeatures.swift) hides the Sports segment, the sports strategies and the bet history, and `ConnectedStore(enabledMarkets:)` refuses bets with `.marketClosed`. Setting the switch to `true` brings everything back.
 
 - Eight fictional teams with Elo-style ratings; two games are scheduled each market day.
 - The win probability is `1 / (1 + 10^((away − home − 60) / 400))` (60 points of home advantage). Moneyline odds add a 4.5 % bookmaker margin.
@@ -188,15 +190,16 @@ Practice cash is not stored; it is $10,000 plus the sum of `cash_delta_minor` ov
 | [`App/Connected/LearnView.swift`](../App/Connected/LearnView.swift) | Strategy list and detail, four calculators |
 | [`App/Connected/ProfileView.swift`](../App/Connected/ProfileView.swift) | Credit score, tier table, responsible-play controls |
 | [`App/Connected/ConnectedComponents.swift`](../App/Connected/ConnectedComponents.swift) | Loading gate, banner, "Simulated" badge, formatting helpers |
+| [`App/Connected/AppFeatures.swift`](../App/Connected/AppFeatures.swift) | Feature switches (sports betting off for now) |
 
 ## 10. Tests
 
-54 tests for the additional features (of 123 in total), all passing on macOS (`swift test`) and on the iOS Simulator (`xcodebuild test`).
+55 tests for the additional features (of 137 in total), all passing on macOS (`swift test`) and on the iOS Simulator (`xcodebuild test`).
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `SecureConnectTests` | 42 | Tier bands and limits, profile encoding, demo personas; deterministic simulators (prices, events, fixtures, bank history; advancing days never rewrites history); spreads (contracts total 102¢) and the bookmaker margin; odds conversions, EV and Kelly; DCA and Martingale; every `PlayGuard` rule and its order; exclusions that can be extended but not shortened; strategy catalog completeness and worked examples |
-| `SecureStoreTests/ConnectedStoreTests` | 12 | Linking and idempotent sync, net worth, unlinking, alerts, stock orders, contract and bet settlement, tier access, cool-off (blocks buying, allows selling, can't be shortened), reset keeps score and settings, the file is encrypted under its own key, wallet transfers ignore the credit score |
+| `SecureStoreTests/ConnectedStoreTests` | 13 | Linking and idempotent sync, net worth, unlinking, alerts, stock orders, contract and bet settlement, tier access, cool-off (blocks buying, allows selling, can't be shortened), reset keeps score and settings, a switched-off market refuses orders, the file is encrypted under its own key, wallet transfers ignore the credit score |
 
 ## 11. Limitations and what a real version would need
 

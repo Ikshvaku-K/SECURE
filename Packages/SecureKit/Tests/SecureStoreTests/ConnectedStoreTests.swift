@@ -141,6 +141,24 @@ struct PracticeMarketTests {
         }
     }
 
+    @Test func aSwitchedOffMarketRefusesOrders() async throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let store = try ConnectedStore(directory: dir, secrets: InMemorySecretStore(), calendar: calendar,
+                                       enabledMarkets: [.equity, .prediction])
+        try await unlock(store)
+        let game = try #require(SportsCatalog.fixtures(fromDay: 1, throughDay: 1).first)
+        await #expect(throws: ConnectedError.play(.marketClosed)) {
+            try await store.placeBet(fixtureID: game.id, selection: .home, stake: usd(10_00), now: connectedNow)
+        }
+        #expect(try await store.bets().isEmpty)
+        #expect(try await store.cash() == usd(10_000_00))
+        try await store.placeEquityOrder(ticker: "TMKT", side: .buy, quantity: 1, now: connectedNow)
+        #expect(try await store.portfolio().positions.count == 1)
+    }
+
     @Test func creditScoreSetsTransactionAccess() async throws {
         let dir = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }

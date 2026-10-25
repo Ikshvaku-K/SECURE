@@ -108,6 +108,9 @@ public actor ConnectedStore {
     public nonisolated let aggregator: any AccountAggregator
     public nonisolated let startingCash: Money
     public nonisolated let databaseURL: URL?
+    /// Markets that accept new orders. A market left out (for example sports, switched off in the app) refuses
+    /// every order with `.marketClosed`; anything already held still settles.
+    public nonisolated let enabledMarkets: Set<MarketKind>
 
     public private(set) var simDay: Int
 
@@ -117,7 +120,8 @@ public actor ConnectedStore {
 
     public init(directory: URL?, name: String = "connected", secrets: any SecretStore,
                 aggregator: any AccountAggregator = SimulatedAggregator(),
-                startingCash: Money = Money(minorUnits: 10_000_00, currency: .usd), calendar: Calendar = .current) throws {
+                startingCash: Money = Money(minorUnits: 10_000_00, currency: .usd), calendar: Calendar = .current,
+                enabledMarkets: Set<MarketKind> = Set(MarketKind.allCases)) throws {
         let (db, url) = try ConnectedDatabase.open(directory: directory, name: name, secrets: secrets,
                                                    keyAccount: "\(name).database-key")
         try ConnectedSchema.migrate(db)
@@ -126,6 +130,7 @@ public actor ConnectedStore {
         self.aggregator = aggregator
         self.startingCash = startingCash
         self.calendar = calendar
+        self.enabledMarkets = enabledMarkets
         self.simDay = Int(try Self.metaInt(db, "sim_day") ?? 0)
     }
 
@@ -446,6 +451,7 @@ public actor ConnectedStore {
 
     /// The tier comes from the stored credit profile, so every order is checked against the user's current score.
     private func guardOrder(_ order: PlayGuard.Order, market: MarketKind, now: Date) throws {
+        guard enabledMarkets.contains(market) else { throw ConnectedError.play(.marketClosed) }
         let usage = try usageToday(now: now)
         let settings = try playSettings()
         let available = try cash()
